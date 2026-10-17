@@ -105,6 +105,14 @@
             android:exported="true"
             android:permission="android.permission.DUMP" />
 
+        <!-- Teste do alto-falante (se a voz começa baixa), só pelo cabo, como o TesteDaIa. Veja TesteDoSom.kt -->
+        <activity
+            android:name=".TesteDoSom"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:taskAffinity="" />
+
         <!-- Encerrar o alarme em andamento, só pelo cabo (permissão DUMP, como o TesteDaIa). Veja PararPeloCabo.kt -->
         <receiver
             android:name=".PararPeloCabo"

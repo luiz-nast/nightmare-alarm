@@ -14,13 +14,12 @@ import android.util.Log
  * Escuta o microfone sem parar até ouvir o que [aceita] (o "stop", em [disseStop]; a frase da
  * verificação, em [repetiu]). Usa o reconhecedor de voz do sistema (no Galaxy, o do Google), no
  * [idioma] pedido (null = o do sistema), de preferência offline, e recomeça sozinho depois de cada frase,
- * silêncio ou erro passageiro. [onOuviu] recebe tudo que ele ouve, ainda no meio da fala; [onFraseFinal],
- * se houver, cada frase terminada que não foi aceita (a resposta da pessoa, na conversa com a IA). Com [juntar],
+ * silêncio ou erro passageiro. [onOuviu] recebe tudo que ele ouve, ainda no meio da fala. Com [juntar],
  * vale também o que ele já ouviu antes (até [PALAVRAS_JUNTAS]): a frase pode sair em pedaços, com
  * pausa no meio. Depois de [LIMITE_FALHAS] erros seguidos (ou na hora, sem o idioma), ou se o
  * reconhecedor ficar [ESPERA_RESPOSTA_MS] sem dar sinal de vida (o serviço do Google caiu), avisa
- * [onIndisponivel]. Com [registrarFala] (o STOP e a verificação), o log mostra o que ele ouviu; sem (a
- * conversa com a IA), só o tamanho. Tudo roda na thread principal.
+ * [onIndisponivel]. O log mostra o que ele ouviu. Tudo roda na thread principal. (A conversa com a IA tem um
+ * ouvido só dela, a [Escuta].)
  */
 class Ouvinte(
     private val ctx: Context,
@@ -31,8 +30,6 @@ class Ouvinte(
     private val onIndisponivel: () -> Unit,
     private val idioma: String? = null,
     private val juntar: Boolean = false,
-    private val onFraseFinal: ((String) -> Unit)? = null,
-    private val registrarFala: Boolean = true,
 ) : RecognitionListener {
     private val handler = Handler(Looper.getMainLooper())
     private var reconhecedor: SpeechRecognizer? = null
@@ -92,16 +89,15 @@ class Ouvinte(
         // Resultado sem nenhuma palavra (o reconhecedor manda "" com barulho) não é fala de ninguém
         val frases = resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().filter { it.any(Char::isLetterOrDigit) }
         if (frases.isEmpty()) return
-        Log.i(TAG, if (registrarFala) "Voz ouviu: $frases" else "Voz ouviu: ${frases.first().length} letras")
+        Log.i(TAG, "Voz ouviu: $frases")
         val ouvidas = if (juntar) frases.map { juntarAoOuvido(it) } else frases
         onOuviu(ouvidas.first())
         if (ouvidas.any(aceita)) {
             Log.i(TAG, "Voz: $nome reconhecido")
             parar()
             onAceito()
-        } else if (terminou) {
-            if (juntar) jaOuvido = ouvidas.first()
-            onFraseFinal?.invoke(ouvidas.first())
+        } else if (terminou && juntar) {
+            jaOuvido = ouvidas.first()
         }
     }
 

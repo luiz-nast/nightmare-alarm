@@ -82,7 +82,7 @@ fun falhaPassageira(codigo: Int, json: String): Boolean {
  * IA): sem resposta, dá pra mandar a mesma fala de novo. Tudo é chamado na thread principal; só o pedido
  * pela internet roda em outra.
  */
-class Gemini(private val instrucao: String, private val falaNaoNegocia: String) : MotorDaConversa {
+class Gemini(private val instrucao: String, private val abertura: String, private val falaNaoNegocia: String) : MotorDaConversa {
 
     companion object {
         private const val ENDERECO = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -108,15 +108,15 @@ class Gemini(private val instrucao: String, private val falaNaoNegocia: String) 
     private var prazo: Runnable? = null
     private var desligado = false
 
-    /** A primeira fala da IA, que abre a conversa ([PEDIDO_DE_ABERTURA]). */
-    override fun abrir(aoResponder: (String?) -> Unit) = perguntar(PEDIDO_DE_ABERTURA, aoResponder)
+    /** A primeira fala da IA, que abre a conversa ([abertura], de [pedidoDeAbertura]). */
+    override fun abrir(aoResponder: (String?) -> Unit) = perguntar(abertura, aoResponder)
 
     /** A pessoa disse [fala] (o que o reconhecedor ouviu): a próxima fala da IA. */
     override fun responder(fala: String, aoResponder: (String?) -> Unit) = perguntar(fala, aoResponder)
 
     /** A conversa volta depois de a pessoa sair da tela ([PEDIDO_DE_RETOMADA]); sem histórico, abre do começo. */
     override fun retomar(aoResponder: (String?) -> Unit) =
-        perguntar(if (historico.isEmpty()) PEDIDO_DE_ABERTURA else PEDIDO_DE_RETOMADA, aoResponder)
+        perguntar(if (historico.isEmpty()) abertura else PEDIDO_DE_RETOMADA, aoResponder)
 
     /** O pedido em curso fica sem resposta (o `aoResponder` dele nunca é chamado). O histórico fica. */
     override fun cancelar() {
@@ -125,6 +125,12 @@ class Gemini(private val instrucao: String, private val falaNaoNegocia: String) 
         emCurso = null
         prazo?.let { handler.removeCallbacks(it) }
         prazo = null
+    }
+
+    /** A resposta que já chegou não vai ser dita (a pessoa voltou a falar): ela e a pergunta saem do histórico. */
+    override fun descartar() {
+        cancelar()
+        if (historico.size >= 2 && historico.last().daIa) repeat(2) { historico.removeAt(historico.lastIndex) }
     }
 
     /** Fim da conversa: nenhum pedido sai nem responde mais. */

@@ -41,13 +41,13 @@ fun falaDosMinutos(minutos: Int) = "$minutos minutes passed."
 // Despertador "conversa + caminhada": as falas que não vêm da IA, gravadas junto com as outras fixas (só nesse alarme)
 
 /** A conversa chegou na meta: em vez da IA, esta pergunta (a resposta passa por querContinuar). */
-const val FALA_CONTINUAR = "That was a good conversation, sir. Do you want to keep talking a little more?"
+const val FALA_CONTINUAR = "Good talk, sir. Want to keep talking a little more?"
 
 /** Fim da conversa (ou, sem a IA, logo depois do bom dia): a caminhada em seguida, chova ou faça sol. */
 const val FALA_SAIR = "Time to move, sir. Get dressed and go outside: you have four minutes to start walking."
 
 /** No lugar de uma fala da IA que manda descansar ou diz que o alarme acabou (respostaSegura). */
-const val FALA_NAO_NEGOCIA = "Not my call, sir. The alarm decides. Tell me, what is the first thing you will do today?"
+const val FALA_NAO_NEGOCIA = "Not my call, sir. What is the first thing you will do today?"
 
 /**
  * O sintetizador de voz do celular, em inglês, com uma voz instalada no celular ([vozSemInternet]): grava igual

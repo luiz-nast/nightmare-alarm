@@ -5,6 +5,8 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.AudioRouting
+import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
@@ -35,8 +37,10 @@ class Sirene(private val ctx: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
     private var bipador: MediaPlayer? = null
-    private var falante: MediaPlayer? = null
-    private var volumeDoFalante = 0 // o da voz ou o dos avisos, conforme o que o [falante] toca
+    private var falante: MediaPlayer? = null // os sons de aviso do app
+    private var faixa: AudioTrack? = null // uma fala ([falar])
+    private var fimDaFaixa: Runnable? = null // garantia, se o fim da [faixa] não avisar
+    private var volumeDoFalante = 0 // o da voz ou o dos avisos, conforme o que o [falante] ou a [faixa] toca
     private var vibrador: Vibrator? = null
     private var foco: AudioFocusRequest? = null
     private var acordador: MediaPlayer? = null // o quase silêncio em loop que deixa o alto-falante ligado ([manterAcordado])
@@ -59,7 +63,7 @@ class Sirene(private val ctx: Context) {
         override fun run() {
             when {
                 volumeAntesDoBipe != null -> {}
-                falante != null -> subirAte(volumeDoFalante)
+                falante != null || faixa != null -> subirAte(volumeDoFalante)
                 player != null -> subirAoPiso()
             }
             handler.postDelayed(this, 1_000)
@@ -151,6 +155,7 @@ class Sirene(private val ctx: Context) {
         bipador = null
         falante?.release()
         falante = null
+        pararFala()
         handler.removeCallbacks(voltarDoBipe)
         voltarDoBipe.run()
         vibrador?.cancel()
@@ -167,9 +172,9 @@ class Sirene(private val ctx: Context) {
      * Bipe curto número [n] da vigia (a pessoa parou de olhar pra câmera): enquanto ele toca (e mais
      * [FOLGA_BIPE_MS]), o volume de alarme fica no degrau dele ([volumeDoBipe]), por cima da trava;
      * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte. No teste, param
-     * no volume dos avisos (40%).
+     * no volume dos avisos (40%). Devolve quanto o bipe dura (ms), pra conversa não ouvir o próprio bipe.
      */
-    fun bipe(n: Int, som: Int = if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe) {
+    fun bipe(n: Int, som: Int = if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe): Long {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
         // No teste (em casa, com gente dormindo), os bipes param no volume dos avisos (40%); no alarme, vão ao máximo
         val degrau = volumeDoBipe(n, maximo).let { if (foto?.alarme?.deTeste == true) minOf(it, volumeDosAvisos()) else it }
@@ -178,18 +183,80 @@ class Sirene(private val ctx: Context) {
         Log.i(TAG, "Sirene: bipe $n no volume $degrau de $maximo")
         bipador?.release()
         bipador = tocarArquivo(somDoApp(som), emLoop = false)
+        val duracao = (bipador?.duration?.coerceAtLeast(0) ?: 0).toLong()
         handler.removeCallbacks(voltarDoBipe)
-        handler.postDelayed(voltarDoBipe, (bipador?.duration?.coerceAtLeast(0) ?: 0) + FOLGA_BIPE_MS)
+        handler.postDelayed(voltarDoBipe, duracao + FOLGA_BIPE_MS)
+        return duracao
     }
 
-    /** Toca uma vez uma fala gravada em [arquivo] (sem arquivo, só segue); [aoTerminar] quando acaba ou se não deu pra tocar. */
-    fun falar(arquivo: File?, aoTerminar: () -> Unit = {}) =
-        if (arquivo == null) aoTerminar() else tocarUmaVez(Uri.fromFile(arquivo), volumeDaVoz(), aoTerminar, ganhoDaVoz())
+    /**
+     * Toca uma vez uma fala gravada em [arquivo] (sem arquivo, só segue), no volume da voz; [aoTerminar] quando acaba ou
+     * se não deu pra tocar. Pelo AudioTrack ([faixaDaFala]): pelo MediaPlayer, as falas de 5 s ou mais começavam baixinho.
+     */
+    fun falar(arquivo: File?, aoTerminar: () -> Unit = {}) {
+        if (arquivo == null) return aoTerminar()
+        pararFala()
+        falante?.release()
+        falante = null
+        val volume = volumeDaVoz()
+        volumeDoFalante = volume
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
+        val (f, quadros) = faixaDaFala(arquivo, ATRIBUTOS) ?: run {
+            Log.w(TAG, "Sirene: fala fora do formato do sintetizador, vai pelo MediaPlayer")
+            return tocarUmaVez(Uri.fromFile(arquivo), volume, aoTerminar, ganhoDaVoz())
+        }
+        noAltoFalante(f)
+        f.setVolume(ganhoDaVoz())
+        val fim = Runnable {
+            if (faixa !== f) return@Runnable
+            pararFala()
+            aoTerminar()
+        }
+        f.notificationMarkerPosition = quadros
+        f.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onMarkerReached(track: AudioTrack) = fim.run()
+            override fun onPeriodicNotification(track: AudioTrack) {}
+        }, handler)
+        // Se o aviso do fim não vier, a fala acaba assim mesmo; mas, se ela começou atrasada e ainda está andando, espera
+        var ondeEstava = -1
+        val garantia = object : Runnable {
+            override fun run() {
+                if (faixa !== f) return
+                val agora = runCatching { f.playbackHeadPosition }.getOrDefault(quadros)
+                if (agora < quadros && agora > ondeEstava) {
+                    ondeEstava = agora
+                    handler.postDelayed(this, FOLGA_FIM_DA_FALA_MS)
+                    return
+                }
+                Log.w(TAG, "Sirene: a fala acabou sem o aviso do fim ($agora de $quadros quadros)")
+                fim.run()
+            }
+        }
+        faixa = f
+        fimDaFaixa = garantia
+        handler.postDelayed(garantia, quadros * 1_000L / f.sampleRate + FOLGA_FIM_DA_FALA_MS)
+        runCatching { f.play() }.onFailure {
+            pararFala()
+            aoTerminar()
+        }
+    }
+
+    /** A fala tocando para, sem avisar o fim dela. */
+    private fun pararFala() {
+        fimDaFaixa?.let(handler::removeCallbacks)
+        fimDaFaixa = null
+        faixa?.let {
+            it.setPlaybackPositionUpdateListener(null)
+            runCatching { it.stop() }
+            it.release()
+        }
+        faixa = null
+    }
 
     /**
      * Uma fala depois de um silêncio longo, fora da conversa (os avisos de 10 em 10 min da câmera): acorda a saída do
-     * alto-falante ([manterAcordado]) e fala [ACORDAR_ANTES_MS] depois, já no volume certo; com a fala, a saída volta
-     * a poder dormir. Já acordada, fala na hora.
+     * alto-falante ([manterAcordado]) e fala [ACORDAR_ANTES_MS] depois, sem o meio segundo mais alto do começo; com a
+     * fala, a saída volta a poder dormir. Já acordada, fala na hora.
      */
     fun falarDepoisDeAcordar(arquivo: File?) {
         if (arquivo == null) return
@@ -225,9 +292,10 @@ class Sirene(private val ctx: Context) {
     /** O estouro de comemoração, depois da fala de parabéns. */
     fun comemoracao(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.comemoracao), volumeDosAvisos(), aoTerminar)
 
-    /** Fala ou som de aviso, uma vez, exatamente no [volume] (travado enquanto toca). */
+    /** Som de aviso (ou fala fora do formato do sintetizador), uma vez, exatamente no [volume] (travado enquanto toca). */
     private fun tocarUmaVez(uri: Uri, volume: Int, aoTerminar: () -> Unit, ganho: Float = 1f) {
         falante?.release()
+        pararFala()
         volumeDoFalante = volume
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
         falante = tocarArquivo(uri, emLoop = false)?.apply {
@@ -243,10 +311,11 @@ class Sirene(private val ctx: Context) {
 
     /**
      * Deixa o alto-falante ligado ([ligado]) com um quase silêncio em loop (`silencio.wav`, ruído a -84 dB, inaudível).
-     * Sem som por 2 s, o Android desliga a saída do alto-falante (conferido no S24 FE: "Standby delay 2 s"), e ela volta
-     * subindo aos poucos: cada fala da IA, que vem depois de 3 a 5 s pensando, começava baixinha e ia crescendo. As
-     * frases da verificação não, porque o "plim" vem logo antes e acorda a saída. Ligado no STOP, com a música
-     * acabando de tocar, a saída nem chega a dormir.
+     * Sem som por 2 s, o Android desliga a saída do alto-falante (no S24 FE, "Standby delay 2 s"), e o primeiro meio
+     * segundo de som depois que ela acorda sai uns 3 dB mais alto (medido na saída, `dumpsys media.audio_flinger`): as
+     * falas da conversa, que vêm depois de uns segundos de silêncio, começariam um pouco mais altas que o resto. Ligado
+     * no STOP, com a música acabando de tocar, a saída nem chega a dormir. (A voz que começava baixinha e ia subindo era
+     * outra coisa, o MediaPlayer: veja [faixaDaFala].)
      */
     fun manterAcordado(ligado: Boolean) {
         acordadoPraFala = false
@@ -328,10 +397,10 @@ class Sirene(private val ctx: Context) {
      * Fixa a saída no alto-falante do celular: com fone ou Bluetooth conectado, o Android tocaria o
      * alarme neles também (ou só neles). Antes do Android 9 o MediaPlayer não tem como escolher a saída.
      */
-    private fun noAltoFalante(mp: MediaPlayer) {
+    private fun noAltoFalante(saida: AudioRouting) {
         if (Build.VERSION.SDK_INT < 28) return
         val alto = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-        if (alto == null || !mp.setPreferredDevice(alto)) Log.w(TAG, "Sirene: não conseguiu fixar o som no alto-falante")
+        if (alto == null || !saida.setPreferredDevice(alto)) Log.w(TAG, "Sirene: não conseguiu fixar o som no alto-falante")
     }
 
     @Suppress("DEPRECATION") // as APIs antigas só são usadas nas versões do Android que não têm as novas
@@ -354,6 +423,9 @@ class Sirene(private val ctx: Context) {
     private companion object {
         /** Antes de uma fala depois de um silêncio longo, o tempo pra saída do alto-falante acordar ([falarDepoisDeAcordar]). */
         const val ACORDAR_ANTES_MS = 1_500L
+
+        /** Depois do tempo de uma fala, quanto ainda espera o aviso do fim dela antes de dar por terminada. */
+        const val FOLGA_FIM_DA_FALA_MS = 1_000L
 
         /** Depois do som do bipe, quanto o volume ainda fica no degrau dele: folga pro som sair do alto-falante. */
         const val FOLGA_BIPE_MS = 700L

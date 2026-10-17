@@ -14,7 +14,7 @@ class GeminiTest {
 
     @Test
     fun pedidoProGeminiTemInstrucaoHistoricoEPoucoPensar() {
-        val turnos = listOf(Turno(daIa = false, texto = PEDIDO_DE_ABERTURA), Turno(daIa = true, texto = "Bom dia!"), Turno(daIa = false, texto = "Ele disse \"oi\"\nde novo"))
+        val turnos = listOf(Turno(daIa = false, texto = pedidoDeAbertura(emptyList())), Turno(daIa = true, texto = "Bom dia!"), Turno(daIa = false, texto = "Ele disse \"oi\"\nde novo"))
         val corpo = JSONObject(corpoDoPedido("Regras", turnos))
         assertEquals("Regras", corpo.getJSONObject("systemInstruction").getJSONArray("parts").getJSONObject(0).getString("text"))
         val conteudos = corpo.getJSONArray("contents")

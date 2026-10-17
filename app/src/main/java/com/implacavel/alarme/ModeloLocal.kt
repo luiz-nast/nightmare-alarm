@@ -41,15 +41,20 @@ private const val MEMORIA_MINIMA = 1_500L * 1024 * 1024
  */
 const val CONTEXTO_TOKENS = 4096
 
-/** Tamanho máximo de uma resposta, em tokens: as falas pedidas têm até 50 palavras. */
-const val RESPOSTA_MAX_TOKENS = 120
+/** Tamanho máximo de uma resposta, em tokens: cada fala é uma pergunta de até 15 palavras (uns 20 tokens), com folga pra uma manchete. */
+const val RESPOSTA_MAX_TOKENS = 48
 
 /**
  * Uma conversa com o Gemma no celular ([MotorDaConversa]): a [instrucao] do treinador vira a instrução do
- * sistema, e o histórico fica no próprio modelo (não precisa mandar tudo de novo). Se a IA sugerir descansar ou
+ * sistema, a [abertura] é o primeiro pedido, e o histórico fica no próprio modelo (não precisa mandar tudo de novo). Se a IA sugerir descansar ou
  * disser que o alarme acabou ([respostaSegura]), vem o [falaNaoNegocia] no lugar.
+ *
+ * Um pedido cancelado não para o modelo: ele termina de escrever e a resposta é jogada fora. Parar no meio
+ * (`cancelProcess`) estraga a conversa pra sempre: medido no S24 FE (`TesteDaIa --ez cancelar true`), todo pedido
+ * depois dele falha com "CANCELLED", cancelando escrevendo ou ainda lendo, na hora ou meio segundo depois. E a
+ * resposta jogada fora fica na memória da IA: o pedido seguinte avisa que ele não ouviu ([pedidoDepoisDeInterrompida]).
  */
-class ModeloLocal(ctx: Context, private val instrucao: String, private val falaNaoNegocia: String) : MotorDaConversa {
+class ModeloLocal(ctx: Context, private val instrucao: String, private val abertura: String, private val falaNaoNegocia: String) : MotorDaConversa {
 
     companion object {
         private val handler = Handler(Looper.getMainLooper())
@@ -130,21 +135,30 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
 
     private val app = ctx.applicationContext
     @Volatile private var conversa: Conversation? = null // criada no primeiro pedido, com a instrução, na thread do modelo
-    @Volatile private var escrevendo = false // o modelo está gerando uma resposta agora
     @Volatile private var pedidos = 0 // muda a cada pedido e cancelamento: resposta de um pedido velho não chega
+    @Volatile private var naoOuvida: String? = null // o modelo respondeu este pedido, e a pessoa não ouviu a resposta (está na memória dele)
+    @Volatile private var ultimaFala = "" // a do último pedido
+    @Volatile private var respondido = -1 // o último pedido que o modelo terminou de responder (thread do modelo)
+    private var entregue = -1 // o último pedido cuja resposta chegou no serviço (thread principal)
     @Volatile private var desligado = false
 
-    override fun abrir(aoResponder: (String?) -> Unit) = perguntar(PEDIDO_DE_ABERTURA, aoResponder)
+    override fun abrir(aoResponder: (String?) -> Unit) = perguntar(abertura, aoResponder)
 
     override fun responder(fala: String, aoResponder: (String?) -> Unit) = perguntar(fala, aoResponder)
 
-    override fun retomar(aoResponder: (String?) -> Unit) = perguntar(if (conversa == null) PEDIDO_DE_ABERTURA else PEDIDO_DE_RETOMADA, aoResponder)
+    override fun retomar(aoResponder: (String?) -> Unit) = perguntar(if (conversa == null) abertura else PEDIDO_DE_RETOMADA, aoResponder)
 
-    /** O pedido em curso fica sem resposta (e o modelo para de escrever). A conversa fica. */
+    /** O pedido em curso fica sem resposta (o modelo termina de escrever, e a resposta vai fora). A conversa fica. */
     override fun cancelar() {
+        // Já respondido e ainda não entregue: a resposta está na memória dele, e a pessoa não vai ouvir
+        if (respondido == pedidos && entregue != pedidos) naoOuvida = ultimaFala
         pedidos++
-        // Só com uma resposta em curso: parado, o cancelamento poderia valer pro próximo pedido
-        if (escrevendo) conversa?.let { runCatching { it.cancelProcess() } }
+    }
+
+    /** A resposta que já chegou não vai ser dita: ela está na memória da IA, e o próximo pedido avisa que ele não ouviu. */
+    override fun descartar() {
+        naoOuvida = ultimaFala
+        cancelar()
     }
 
     /** Fim desta conversa: nenhum pedido sai nem responde mais. O modelo fica carregado até o [liberar]. */
@@ -161,6 +175,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
     private fun perguntar(fala: String, aoResponder: (String?) -> Unit) {
         if (desligado) return
         cancelar() // um pedido por vez
+        ultimaFala = fala
         val numero = pedidos
         val inicio = SystemClock.elapsedRealtime()
         trabalho.execute {
@@ -168,13 +183,15 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
             val resposta = try {
                 val c = conversaPronta()
                 if (numero != pedidos || desligado) return@execute // cancelado enquanto carregava ou lia a instrução
-                escrevendo = true
-                textoDe(c.sendMessage(fala))
+                val mensagem = naoOuvida?.let { pedidoDepoisDeInterrompida(it, fala) } ?: fala
+                naoOuvida = null
+                textoDe(c.sendMessage(mensagem)).also {
+                    respondido = numero
+                    if (numero != pedidos) naoOuvida = fala // cancelado enquanto escrevia
+                }
             } catch (e: Throwable) {
                 if (numero == pedidos) Log.w(TAG, "IA do celular: sem resposta (${e.javaClass.simpleName}: ${e.message?.take(120)})")
                 null
-            } finally {
-                escrevendo = false
             }
             handler.post { entregar(numero, resposta, SystemClock.elapsedRealtime() - inicio, aoResponder) }
         }
@@ -193,6 +210,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
 
     private fun entregar(numero: Int, resposta: String?, demora: Long, aoResponder: (String?) -> Unit) {
         if (numero != pedidos || desligado) return // cancelado, ou já tem um pedido mais novo
+        entregue = numero
         val limpa = resposta?.let(::limparFala)?.ifEmpty { null }
         val segura = limpa == null || respostaSegura(limpa)
         if (!segura) Log.i(TAG, "Conversa: a IA sugeriu descansar ou parar, vai a frase fixa no lugar")

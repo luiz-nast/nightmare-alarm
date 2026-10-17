@@ -102,6 +102,109 @@ class ConversaTest {
     }
 
     @Test
+    fun falaDaIaFicaSoComAPergunta() {
+        // A explicação que ela emenda depois da pergunta não vai pra voz
+        assertEquals("Nice, what are you training today, sir?", limparFala("Nice, what are you training today, sir? I love the gym. It keeps you sharp."))
+        assertEquals("Not my call, sir. What is the first thing you will do today?", soAPergunta("Not my call, sir. What is the first thing you will do today? Tell me."))
+        // Um "What?" sozinho no começo não é a pergunta inteira
+        assertEquals("What? Why did you skip it?", soAPergunta("What? Why did you skip it? That's a shame."))
+        assertEquals("Good morning, sir.", soAPergunta("Good morning, sir."))
+    }
+
+    @Test
+    fun aIaPensaMaisDevagarQuandoAFalaParaNoMeio() {
+        assertEquals(PAUSA_PRA_PENSAR_MS, pausaPraPensar("I want to go to the gym today"))
+        assertEquals(PAUSA_PRA_PENSAR_MS, pausaPraPensar("Yeah."))
+        assertEquals(PAUSA_NO_MEIO_MS, pausaPraPensar("I want to go to the gym and"))
+        assertEquals(PAUSA_NO_MEIO_MS, pausaPraPensar("I think, um..."))
+        assertEquals(PAUSA_NO_MEIO_MS, pausaPraPensar("Because"))
+        assertTrue(PAUSA_PRA_PENSAR_MS < PAUSA_NO_MEIO_MS)
+    }
+
+    @Test
+    fun aberturaPerguntaDaPrimeiraManchete() {
+        val pedido = pedidoDeAbertura(listOf("Preço do café sobe 30% no ano - g1", "Dólar cai - Folha"))
+        assertTrue(pedido.contains("\"Preço do café sobe 30% no ano\""))
+        assertFalse(pedido.contains("g1"))
+        assertFalse(pedido.contains("Dólar"))
+        assertTrue(pedidoDeAbertura(emptyList()).contains("his plans for today"))
+    }
+
+    @Test
+    fun somDeLongeNaoSeguraAIa() {
+        // Sem saber a voz dele ainda, todo som pode ser dele
+        assertTrue(somDaPessoa(-60f, null))
+        // A voz dele em -35 dB: um "hmm" a -45 é dele; a TV a -55, de longe
+        val voz = nivelDaVoz(nivelDaVoz(null, -34f), -36f)
+        assertEquals(-34.6f, voz, 0.01f)
+        assertTrue(somDaPessoa(-45f, voz))
+        assertFalse(somDaPessoa(-55f, voz))
+    }
+
+    @Test
+    fun reescritaDoReconhecedorNaoEhFalaNova() {
+        assertEquals(quantasPalavras("Knife what are you going"), quantasPalavras("Nice, what are you going."))
+        assertEquals(3, quantasPalavras("I'm going to"))
+        assertEquals(0, quantasPalavras("  ... "))
+    }
+
+    @Test
+    fun respostaJogadaForaAvisaAIa() {
+        // Ele continuou a frase: vai só o resto (a IA já tem o começo na memória)
+        val continuou = pedidoDepoisDeInterrompida("I want to go to the gym and", "I want to go to the gym and then work")
+        assertTrue(continuou.contains("did not hear your last reply"))
+        assertTrue(continuou.endsWith("He went on:] then work"))
+        // O reconhecedor reescreveu o começo ("Knife" vira "Nice", pontuação): ainda é continuação
+        assertTrue(pedidoDepoisDeInterrompida("Knife what are you", "Nice, what are you doing today?").endsWith("He went on:] doing today?"))
+        // Outra fala (ou a retomada depois da música): vai inteira
+        val outra = pedidoDepoisDeInterrompida("I want to run", "Let's talk about coffee")
+        assertTrue(outra.endsWith("Answer this instead:] Let's talk about coffee"))
+    }
+
+    @Test
+    fun detectorPegaUmAhnCurtoNoQuartoQuieto() {
+        val d = DetectorDeSom()
+        repeat(200) { assertNull(d.quadro(-62f + it % 3)) } // o ruído do quarto
+        // Um "ahn" de 200 ms, 20 dB acima: começa no 3º pedaço (60 ms)
+        assertNull(d.quadro(-40f))
+        assertNull(d.quadro(-40f))
+        assertEquals(true, d.quadro(-40f))
+        repeat(7) { assertNull(d.quadro(-40f)) }
+        // E acaba com 300 ms de silêncio
+        repeat(14) { assertNull(d.quadro(-62f)) }
+        assertEquals(false, d.quadro(-62f))
+    }
+
+    @Test
+    fun detectorOuveQuemJaComecaFalando() {
+        // Sem ter ouvido o quarto, o piso é o de um quarto quieto: a fala logo no começo conta
+        val d = DetectorDeSom()
+        assertNull(d.quadro(-40f))
+        assertNull(d.quadro(-38f))
+        assertEquals(true, d.quadro(-41f))
+    }
+
+    @Test
+    fun detectorIgnoraEstaloLencolEVentilador() {
+        val d = DetectorDeSom()
+        repeat(100) { d.quadro(-62f) }
+        // Um estalo de 40 ms não é a pessoa
+        assertNull(d.quadro(-30f))
+        assertNull(d.quadro(-30f))
+        assertNull(d.quadro(-62f))
+        assertFalse(d.falando)
+        // Um ventilador que liga: no começo é som, mas em uns segundos vira o ruído do quarto
+        var ultimo: Boolean? = null
+        repeat(300) { d.quadro(-45f)?.let { ultimo = it } }
+        assertEquals(false, ultimo)
+        assertFalse(d.falando)
+        // Num quarto em silêncio total, um lençol mexendo (-75 dB) não conta
+        val quieto = DetectorDeSom()
+        repeat(200) { quieto.quadro(-90f) }
+        repeat(10) { assertNull(quieto.quadro(-75f)) }
+    }
+
+    @Test
     fun instrucaoDoTreinadorTemAsRegrasAsNoticiasEAsMetas() {
         val instrucao = instrucaoDoTreinador(
             listOf("Senado vota fim da escala 6x1 - O GLOBO", "Dólar cai - g1"), "Correr 3x por semana", LocalTime.of(6, 40),
@@ -111,10 +214,10 @@ class ConversaTest {
         assertTrue(instrucao.contains("1. Senado vota fim da escala 6x1 - O GLOBO"))
         assertTrue(instrucao.contains("2. Dólar cai - g1"))
         assertTrue(instrucao.contains("Correr 3x por semana"))
-        assertTrue(instrucao.contains("Not my call, sir. The alarm decides."))
+        assertTrue(instrucao.contains("Not my call, sir."))
         assertTrue(instrucao.contains("Stay on the same subject"))
         assertTrue(instrucao.contains("Change the subject only when it has died"))
-        assertTrue(instrucao.contains("50 words"))
+        assertTrue(instrucao.contains("ONE short, direct question, 15 words at most"))
         // Sem notícias nem metas
         val vazia = instrucaoDoTreinador(emptyList(), "  ", LocalTime.of(14, 5))
         assertTrue(vazia.contains("2:05 PM"))

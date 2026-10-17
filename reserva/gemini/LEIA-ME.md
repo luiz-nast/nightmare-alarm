@@ -25,7 +25,8 @@ APK). Ele só volta se o modelo do celular não servir.
    modelo do celular, se os dois existirem):
    ```kotlin
    fun disponivel(ctx: Context) = Gemini.disponivel(ctx)
-   fun criar(ctx: Context, instrucao: String, falaNaoNegocia: String): MotorDaConversa? = Gemini(instrucao, falaNaoNegocia)
+   fun criar(ctx: Context, instrucao: String, abertura: String, falaNaoNegocia: String): MotorDaConversa? =
+       Gemini(instrucao, abertura, falaNaoNegocia)
    ```
 5. Voltar no `AndroidManifest.xml` a permissão `ACCESS_NETWORK_STATE` (o `Gemini.disponivel` confere se há
    internet de verdade).

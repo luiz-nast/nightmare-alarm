@@ -287,40 +287,14 @@ fun EtapaSaudacao(hora: Int, caminhada: Boolean = false) {
 }
 
 /**
- * Conversa da manhã com a IA ([AlarmeService.conversa]): mostra a fala da IA e, na vez da pessoa, escuta em
- * inglês e mostra o que ouve ("Ouvi: …", com as frases já terminadas desta vez). Qualquer fala ouvida avisa o
- * serviço ([AlarmeService.ouviu]) e cada frase terminada vai pra ele ([AlarmeService.respondeu]), que espera ela
- * parar de falar pra mandar tudo pra IA; a vez de cada um, o relógio da conversa e os bipes do
- * silêncio são de lá. O anel enche com o tempo de conversa ("3:12 de 10:00"); em silêncio na sua vez, a contagem
- * pro bipe (a partir de [AlarmeService.ultimaFala]). Sem reconhecimento de voz, o serviço encerra a conversa.
+ * Conversa da manhã com a IA ([AlarmeService.conversa]): mostra a fala da IA e o que a pessoa disse nesta vez
+ * ("Ouvi: …"). Quem ouve é o serviço ([Escuta]): a vez de cada um, o relógio da conversa e os bipes do silêncio são
+ * de lá. O anel enche com o tempo de conversa ("3:12 de 10:00"); em silêncio na sua vez, a contagem pro bipe (a
+ * partir de [AlarmeService.ultimaFala]).
  */
 @Composable
 fun EtapaConversa(conversa: Conversa) {
-    val ctx = LocalContext.current
-    // O que a pessoa disse nesta vez: fica na tela enquanto a IA pensa, e some quando chega a vez seguinte
-    var ouvido by remember(conversa.vez) { mutableStateOf("") }
-    var frasesDitas by remember(conversa.vez) { mutableStateOf("") } // as já terminadas: a fala pode vir em pedaços
-    if (conversa.suaVez) {
-        DisposableEffect(conversa.vez) {
-            val ouvinte = Ouvinte(
-                ctx, "resposta", aceita = { false },
-                onOuviu = {
-                    ouvido = "$frasesDitas $it".trim()
-                    AlarmeService.ouviu(ctx, it)
-                },
-                onAceito = {},
-                onIndisponivel = { AlarmeService.semVozNaConversa(ctx) },
-                idioma = "en-US",
-                onFraseFinal = {
-                    frasesDitas = "$frasesDitas $it".trim()
-                    AlarmeService.respondeu(ctx, it)
-                },
-                registrarFala = false, // a conversa não vai pro log (privacidade)
-            )
-            ouvinte.comecar()
-            onDispose { ouvinte.parar() }
-        }
-    }
+    val ouvido = conversa.ouvido
     val ultimaFala by AlarmeService.ultimaFala.collectAsStateWithLifecycle()
     var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {

@@ -54,16 +54,17 @@ import java.time.LocalTime
  *   direto pra caminhada). Quem decide tudo são os relógios daqui: a IA só produz o texto das falas.
  *
  * Comandos pela action do Intent, cada um com uma função no companion: tocar, missão cumprida,
- * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz, respondeu e andando.
+ * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz e andando. Na conversa, quem ouve é a
+ * [Escuta], daqui mesmo.
  * O comando reexibir vem da notificação arrastada pro lado.
  */
 /** Um passo da verificação do meio: a [frase] da vez ([numero] de 5; vazia na fala de abertura e no agradecimento) e se é a [suaVez] de repetir. */
 data class Verificacao(val frase: String, val numero: Int, val suaVez: Boolean)
 
 /**
- * A conversa da manhã com a IA: a [falaDaIa] mostrada, se é a [suaVez] de a pessoa falar ([vez] conta as vezes,
- * pra tela recomeçar a escuta a cada uma), se o app está [pensando] (esperando a IA ou a voz gravar), o tempo
- * de conversa pura ([conversadoMs]) e a meta, e se a pergunta agora é se ela quer continuar ([perguntandoSeContinua]).
+ * A conversa da manhã com a IA: a [falaDaIa] mostrada, se é a [suaVez] de a pessoa falar, o que ela disse nesta vez
+ * ([ouvido]), se o app está [pensando] (esperando a IA ou a voz gravar), o tempo de conversa pura ([conversadoMs]) e a
+ * meta, e se a pergunta agora é se ela quer continuar ([perguntandoSeContinua]).
  */
 data class Conversa(
     val falaDaIa: String,
@@ -72,7 +73,7 @@ data class Conversa(
     val conversadoMs: Long,
     val metaMs: Long,
     val perguntandoSeContinua: Boolean = false,
-    val vez: Int = 0,
+    val ouvido: String = "",
 )
 
 /** A caminhada da manhã: o tempo já [andadoMs] (guardado pelo serviço), a meta e o fim do prazo pra sair de casa ([prazoAte], SystemClock.elapsedRealtime). */
@@ -99,13 +100,11 @@ class AlarmeService : Service() {
         private const val ACAO_OUVIU = "ouviu"
         private const val ACAO_REPETIU = "repetiu"
         private const val ACAO_SEM_VOZ = "sem_voz"
-        private const val ACAO_RESPONDEU = "respondeu"
         private const val ACAO_ANDANDO = "andando"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_OLHADO = "olhado"
         private const val EXTRA_COMEMORAR = "comemorar"
-        private const val EXTRA_TEXTO = "texto"
         private const val EXTRA_ANDADO = "andado"
 
         /**
@@ -142,6 +141,12 @@ class AlarmeService : Service() {
 
         /** Na conversa, se a voz travar gravando a fala da IA, ela vai só na tela depois disso e a vez passa pra pessoa. */
         private const val VOZ_DA_IA_MAX_MS = 10_000L
+
+        /** O bipe do silêncio na conversa demora isso pra começar a sair (o MediaPlayer): a escuta fica surda também. */
+        private const val ATRASO_DO_BIPE_MS = 300L
+
+        /** O reconhecedor fecha a frase até isso depois de a IA começar a pensar, às vezes com uma palavra a mais: não é fala nova. */
+        private const val FRASE_ATRASADA_MS = 1_000L
 
         /** Falas fixas, gravadas assim que a voz fica pronta: o início e os avisos de 10, 20 e 30 min. */
         private const val FALA_DO_INICIO = "inicio"
@@ -270,8 +275,8 @@ class AlarmeService : Service() {
         /** A pessoa vai desbloquear o celular ou liberar a câmera: por [TEMPO_FORA_MS] a tela do alarme não reabre. */
         fun darTempo(ctx: Context) { ctx.startService(comando(ctx, ACAO_DAR_TEMPO)) }
 
-        /** Na verificação ou na conversa, o reconhecedor ouviu alguma fala ([texto], o pedaço da frase de agora): a pessoa está respondendo. */
-        fun ouviu(ctx: Context, texto: String = "") { ctx.startService(comando(ctx, ACAO_OUVIU).putExtra(EXTRA_TEXTO, texto)) }
+        /** Na verificação, o reconhecedor ouviu alguma fala: a pessoa está respondendo. */
+        fun ouviu(ctx: Context) { ctx.startService(comando(ctx, ACAO_OUVIU)) }
 
         /** Na verificação, a pessoa repetiu a frase da vez. */
         fun repetiu(ctx: Context) { ctx.startService(comando(ctx, ACAO_REPETIU)) }
@@ -279,11 +284,6 @@ class AlarmeService : Service() {
         /** Na verificação, o reconhecimento de voz não funciona (ex.: inglês sem internet): ela é pulada. */
         fun semVozNaVerificacao(ctx: Context) { ctx.startService(comando(ctx, ACAO_SEM_VOZ)) }
 
-        /** Na conversa, o reconhecimento de voz não funciona: a conversa acaba antes e a manhã segue. */
-        fun semVozNaConversa(ctx: Context) { ctx.startService(comando(ctx, ACAO_SEM_VOZ)) }
-
-        /** Na conversa, a pessoa terminou uma fala ([texto], o que o reconhecedor ouviu): vai pra IA. O "ouviu" serve de sinal de fala, como na verificação. */
-        fun respondeu(ctx: Context, texto: String) { ctx.startService(comando(ctx, ACAO_RESPONDEU).putExtra(EXTRA_TEXTO, texto)) }
 
         /**
          * Sinal da etapa da caminhada de que a pessoa está andando (ou andava até agora), com o tempo
@@ -330,10 +330,13 @@ class AlarmeService : Service() {
     private var iaFalando = false // a voz da IA está tocando: o relógio da conversa anda
     private var vezDaConversa = 0L // SystemClock.elapsedRealtime em que começou a vez da pessoa
     private var ouvidoEm = 0L // a última fala ouvida na vez da pessoa
-    private var falaJunta = "" // as frases terminadas desta vez da pessoa, esperando ela parar de falar ([fimDaFala])
-    private var falaAberta = "" // o pedaço que ela ainda está falando, depois da última frase terminada (o que a tela mostra)
+    private var escuta: Escuta? = null // o microfone e o reconhecedor da conversa, do começo ao fim dela
+    private var textoDaVez = "" // o que a pessoa disse desde a última fala da IA (a [escuta] manda tudo junto)
+    private var fazendoSom = false // ela está fazendo som agora (o detector da [escuta]), e o som é dela ([somDaPessoa])
+    private var nivelDaPessoa: Float? = null // o volume da voz dela (dB), dos sons que viraram palavra ([nivelDaVoz])
+    private var provisoria: Provisoria? = null // a resposta da IA pro que ela disse, antes de a voz começar
+    private var vezDaIa = 0 // muda a cada resposta jogada fora: a voz dela, se ainda estiver gravando, não toca
     private var bipesDaConversa = 0 // do silêncio, desde a última fala
-    private var vezes = 0 // vezes da pessoa ([Conversa.vez])
     private var falasDaIa = 0 // cada fala da IA grava num arquivo seu
     private var ultimoTique = 0L
     private var andado = 0L // tempo andando na caminhada
@@ -509,22 +512,16 @@ class AlarmeService : Service() {
             // Com a tela fechada não há janela de escuta: a música fica no volume cheio
             acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
             acao == ACAO_DAR_TEMPO -> foraAte = SystemClock.elapsedRealtime() + TEMPO_FORA_MS
-            // Na conversa, toda fala na vez da pessoa conta. Na verificação, fala que não acerta a frase só segura
-            // a contagem do silêncio até o prazo da frase
-            acao == ACAO_OUVIU -> if (_conversa.value?.suaVez == true) {
-                ouviuNaConversa(intent.getStringExtra(EXTRA_TEXTO).orEmpty())
-            } else if (_verificacao.value?.suaVez == true && SystemClock.elapsedRealtime() - vezComecou < PRAZO_FRASE_MS) {
+            // Na verificação, fala que não acerta a frase só segura a contagem do silêncio até o prazo da frase
+            acao == ACAO_OUVIU -> if (_verificacao.value?.suaVez == true && SystemClock.elapsedRealtime() - vezComecou < PRAZO_FRASE_MS) {
                 esperarResposta()
             }
             acao == ACAO_REPETIU -> repetiuFrase()
-            acao == ACAO_SEM_VOZ -> if (_conversa.value != null) {
-                terminarConversa("sem reconhecimento de voz")
-            } else if (_verificacao.value != null && !cumprido) {
+            acao == ACAO_SEM_VOZ -> if (_verificacao.value != null && !cumprido) {
                 Log.w(TAG, "Missão: sem reconhecimento de voz, a verificação é pulada")
                 handler.removeCallbacks(silencio)
                 agradecer()
             }
-            acao == ACAO_RESPONDEU -> respondeuNaConversa(intent.getStringExtra(EXTRA_TEXTO).orEmpty())
             acao == ACAO_ANDANDO -> andou(intent.getLongExtra(EXTRA_ANDADO, 0L))
         }
         return START_NOT_STICKY
@@ -541,6 +538,7 @@ class AlarmeService : Service() {
         esperaDesbloqueio?.let { unregisterReceiver(it) }
         voz?.desligar()
         rodadaConversa++ // notícias e IA atrasadas não chegam em ninguém
+        pararEscuta()
         motor?.desligar()
         MotorDaConversa.liberar()
         _silenciado.value = false
@@ -881,7 +879,8 @@ class AlarmeService : Service() {
         val rodada = rodadaConversa
         Noticias.buscar { manchetes, metas ->
             if (rodada != rodadaConversa) return@buscar
-            val ia = MotorDaConversa.criar(this, instrucaoDoTreinador(manchetes, metas, LocalTime.now()), FALA_NAO_NEGOCIA).also { motor = it }
+            val ia = MotorDaConversa.criar(this, instrucaoDoTreinador(manchetes, metas, LocalTime.now()), pedidoDeAbertura(manchetes), FALA_NAO_NEGOCIA)
+                .also { motor = it }
             if (ia == null) { // o motor não abriu: sem abertura, só a caminhada
                 aberturaChegou = true
                 return@buscar decidir()
@@ -964,12 +963,24 @@ class AlarmeService : Service() {
     /** Quanto de conversa a manhã pede agora: a meta do [alarme], mais o tempo extra se a pessoa quis continuar. */
     private fun metaDaConversa(alarme: Alarme) = metaConversa(alarme) + extras * extraDaConversa(alarme)
 
-    /** A conversa começa com a [primeira] fala da IA ou, sem ela, volta depois da música, com a IA retomando ([MotorDaConversa.retomar]). */
+    /**
+     * A conversa começa com a [primeira] fala da IA ou, sem ela, volta depois da música, com a IA retomando
+     * ([MotorDaConversa.retomar]). A [escuta] liga já, e fica ligada até a conversa acabar ou a música voltar.
+     */
     private fun abrirConversa(primeira: String?) {
         val alarme = _tocando.value ?: return
         Log.i(TAG, "Conversa: ${if (primeira != null) "começa" else "volta"}, ${conversadoMs / 1000} s de ${metaDaConversa(alarme) / 1000}")
         falhas = 0
-        _conversa.value = Conversa(falaDaIa = "", suaVez = false, pensando = true, conversadoMs = conversadoMs, metaMs = metaDaConversa(alarme), vez = vezes)
+        _conversa.value = Conversa(falaDaIa = "", suaVez = false, pensando = true, conversadoMs = conversadoMs, metaMs = metaDaConversa(alarme))
+        if (Build.VERSION.SDK_INT < 33) return terminarConversa("o reconhecimento de voz da conversa pede o Android 13")
+        val rodada = rodadaConversa
+        escuta?.parar()
+        escuta = Escuta(
+            this,
+            onSom = { comecou, db -> if (rodada == rodadaConversa) somNaConversa(comecou, db) },
+            onTexto = { if (rodada == rodadaConversa) textoNaConversa(it) },
+            onIndisponivel = { if (rodada == rodadaConversa) terminarConversa("sem reconhecimento de voz") },
+        ).also { if (!it.comecar()) return }
         ultimoTique = SystemClock.elapsedRealtime()
         handler.removeCallbacks(tiqueDaConversa)
         handler.postDelayed(tiqueDaConversa, TIQUE_CONVERSA_MS)
@@ -1003,7 +1014,7 @@ class AlarmeService : Service() {
             if (n > bipesDaConversa) {
                 bipesDaConversa = n
                 Log.i(TAG, "Conversa: ${calado / 1000} s calado na sua vez, bipe $n")
-                sirene.bipe(n)
+                escuta?.surdoPor(sirene.bipe(n) + ATRASO_DO_BIPE_MS)
             }
         }
     }
@@ -1012,7 +1023,8 @@ class AlarmeService : Service() {
     private fun pedirAIa(pedido: PedidoDaIa) {
         if (falhas == 0) esperaDesde = SystemClock.elapsedRealtime() // fala nova: a espera conta daqui (pedir de novo não recomeça)
         ultimoPedido = pedido
-        _conversa.value = _conversa.value?.copy(suaVez = false, pensando = true)
+        // Com a resposta segurada (ele fez um som), pedir de novo não tira a vez dele
+        if (provisoria?.segurada != true) _conversa.value = _conversa.value?.copy(suaVez = false, pensando = true)
         val rodada = rodadaConversa
         val este = ++pedidosDaIa
         val vale = { rodada == rodadaConversa && este == pedidosDaIa } // só a primeira de resposta e prazo conta
@@ -1058,93 +1070,186 @@ class AlarmeService : Service() {
     }
 
     /**
+     * A resposta da IA pro que a pessoa disse ([texto]), antes de a voz começar: ainda pode ir fora. Um som dela sem
+     * palavra a [segurada] (a voz espera); se ela só fez barulho, a mesma resposta vale na próxima pausa, já pronta.
+     */
+    private class Provisoria(val texto: String) {
+        val desde = SystemClock.elapsedRealtime()
+        var segurada = false
+        var chegou = false // a IA já respondeu (a resposta está na memória dela)
+        var gravada = false // a voz da resposta está pronta ([fala], [arquivo]; sem arquivo, só na tela)
+        var fala = ""
+        var arquivo: File? = null
+    }
+
+    /**
      * A voz fala o [texto] da IA (gravado agora, num arquivo novo; o [FALA_NAO_NEGOCIA] já está gravado) e a
      * tela mostra; o relógio anda enquanto ela toca. Quando acaba, é a vez da pessoa. Se a voz travar gravando,
-     * em [VOZ_DA_IA_MAX_MS] a fala vai só na tela e a vez passa pra pessoa assim mesmo.
+     * em [VOZ_DA_IA_MAX_MS] a fala vai só na tela e a vez passa pra pessoa assim mesmo. Uma resposta jogada fora
+     * enquanto a voz gravava ([descartarResposta]) não toca; uma [Provisoria.segurada] espera a próxima pausa.
      */
     private fun falarDaIa(texto: String) {
         val rodada = rodadaConversa
+        val esta = vezDaIa
         var foi = false // a gravação e o prazo dela chegando os dois: só o primeiro vale
-        val tocar: (File?) -> Unit = tocar@{ arquivo ->
-            if (rodada != rodadaConversa || foi) return@tocar
+        val pronta: (File?) -> Unit = pronta@{ arquivo ->
+            if (rodada != rodadaConversa || esta != vezDaIa || foi) return@pronta
             foi = true
-            _conversa.value = _conversa.value?.copy(falaDaIa = texto, pensando = false)
-            iaFalando = arquivo != null
-            sirene.falar(arquivo) {
-                if (rodada != rodadaConversa) return@falar
-                iaFalando = false
-                suaVezNaConversa()
-            }
+            val p = provisoria ?: return@pronta tocarFalaDaIa(texto, arquivo)
+            p.gravada = true
+            p.fala = texto
+            p.arquivo = arquivo
+            if (!p.segurada) tocarFalaDaIa(texto, arquivo)
         }
-        if (texto == FALA_NAO_NEGOCIA) return tocar(voz?.fixa(FALA_DE_NAO_NEGOCIAR))
-        val v = voz ?: return tocar(null)
+        provisoria?.chegou = true
+        if (texto == FALA_NAO_NEGOCIA) return pronta(voz?.fixa(FALA_DE_NAO_NEGOCIAR))
+        val v = voz ?: return pronta(null)
         handler.postDelayed({
-            if (!foi && rodada == rodadaConversa) {
+            if (!foi && rodada == rodadaConversa && esta == vezDaIa) {
                 Log.w(TAG, "Conversa: a voz não gravou a fala da IA em ${VOZ_DA_IA_MAX_MS / 1000} s, vai só na tela")
-                tocar(null)
+                pronta(null)
             }
         }, VOZ_DA_IA_MAX_MS)
-        v.gravar("ia_${++falasDaIa}", texto, tocar)
+        v.gravar("ia_${++falasDaIa}", texto, pronta)
     }
 
-    /** A voz da IA acabou: é a vez da pessoa falar (a tela escuta). O silêncio conta daqui. */
+    /** Daqui em diante a vez é da IA: a voz vai até o fim, e depois é a vez da pessoa. */
+    private fun tocarFalaDaIa(texto: String, arquivo: File?) {
+        val rodada = rodadaConversa
+        provisoria = null
+        _conversa.value = _conversa.value?.copy(falaDaIa = texto, suaVez = false, pensando = false)
+        iaFalando = arquivo != null
+        falarNaConversa(arquivo) {
+            if (rodada != rodadaConversa) return@falarNaConversa
+            iaFalando = false
+            suaVezNaConversa()
+        }
+    }
+
+    /** Uma fala da voz na conversa: enquanto ela toca, a [escuta] não ouve (o eco da voz não é a pessoa). */
+    private fun falarNaConversa(arquivo: File?, depois: () -> Unit) {
+        escuta?.surdo(true)
+        sirene.falar(arquivo) {
+            escuta?.surdo(false)
+            depois()
+        }
+    }
+
+    /** A voz da IA acabou: é a vez da pessoa falar. O silêncio conta daqui, e o que ela disse antes não vale mais. */
     private fun suaVezNaConversa() {
         val c = _conversa.value ?: return
         val agora = SystemClock.elapsedRealtime()
         vezDaConversa = agora
         bipesDaConversa = 0
-        falaJunta = ""
-        falaAberta = ""
-        handler.removeCallbacks(fimDaFala)
+        textoDaVez = ""
+        provisoria = null
+        escuta?.novaVez()
+        handler.removeCallbacks(fimDaVez)
         _ultimaFala.value = agora
-        _conversa.value = c.copy(suaVez = true, pensando = false, vez = ++vezes)
+        _conversa.value = c.copy(suaVez = true, pensando = false, ouvido = "")
     }
 
     /**
-     * O reconhecedor ouviu fala na vez da pessoa ([texto], o pedaço da frase de agora): o relógio anda, e o silêncio
-     * (e os bipes) recomeça do zero. Com uma frase já terminada nesta vez, ela continua falando: a fala só vai pra IA
-     * [FIM_DA_FALA_MS] depois deste som, com este pedaço junto (se a frase dele não terminar a tempo, não se perde).
+     * O detector da [escuta]: a pessoa começou ([comecou], com o volume [db]) ou parou de fazer som. Um som bem mais
+     * baixo que a voz dela é de longe e não conta ([somDaPessoa]): nem segura a IA, nem atrasa a vez dela. Começou:
+     * se a IA já pensava na resposta, a voz espera ([Provisoria.segurada]). Parou: conta a pausa ([agendarFimDaVez]).
      */
-    private fun ouviuNaConversa(texto: String = "") {
+    private fun somNaConversa(comecou: Boolean, db: Float) {
+        if (!comecou) {
+            if (!fazendoSom) return // o fim de um som de longe
+            fazendoSom = false
+            return agendarFimDaVez()
+        }
+        if (!somDaPessoa(db, nivelDaPessoa)) return
+        fazendoSom = true
+        val p = provisoria
+        if (p != null) {
+            if (!p.segurada) Log.i(TAG, "Conversa: um som dele (${db.toInt()} dB) antes da voz, a resposta da IA espera")
+            p.segurada = true
+            _conversa.value = _conversa.value?.copy(suaVez = true, pensando = false)
+        }
+        vozDaPessoa()
+    }
+
+    /**
+     * O reconhecedor escreveu mais do que a pessoa disse nesta vez ([texto], tudo junto): a tela mostra, e vale como
+     * fala dela. Com a IA já pensando, a resposta vai fora: ela não tinha acabado.
+     */
+    private fun textoNaConversa(texto: String) {
+        val c = _conversa.value ?: return
+        if (texto == textoDaVez || (!c.suaVez && provisoria == null)) return
+        textoDaVez = texto
+        escuta?.let { nivelDaPessoa = nivelDaVoz(nivelDaPessoa, it.nivelDoUltimoSom()) }
+        _conversa.value = c.copy(ouvido = texto)
+        // Mais palavras com a IA já pensando: ele continuou falando, e a resposta vai fora. Menos de 1 s depois do
+        // pedido e sem som novo dele, é só o reconhecedor fechando a frase (às vezes com uma palavra a mais)
+        val p = provisoria
+        val continuou = p != null && quantasPalavras(texto) > quantasPalavras(p.texto) &&
+            (p.segurada || SystemClock.elapsedRealtime() - p.desde > FRASE_ATRASADA_MS)
+        if (continuou) {
+            Log.i(TAG, "Conversa: ele continuou falando antes da voz, a resposta da IA vai fora (${escuta?.resumo()})")
+            descartarResposta()
+        }
+        vozDaPessoa()
+        if (!fazendoSom) agendarFimDaVez() // a palavra chegou depois do som: a pausa conta daqui
+    }
+
+    /** A pessoa está falando (ou fez algum som): o relógio anda e o silêncio (e os bipes) recomeça. */
+    private fun vozDaPessoa() {
+        if (_conversa.value?.suaVez != true) return
         val agora = SystemClock.elapsedRealtime()
         ouvidoEm = agora
         _ultimaFala.value = agora
         bipesDaConversa = 0
-        if (texto.isNotBlank()) falaAberta = texto
-        if (falaJunta.isNotEmpty()) {
-            handler.removeCallbacks(fimDaFala)
-            handler.postDelayed(fimDaFala, FIM_DA_FALA_MS)
-        }
+        handler.removeCallbacks(fimDaVez)
+    }
+
+    /** A resposta que a IA pensava (ou a voz gravava, ou estava segurada) não vale mais: a vez é da pessoa, com o que ela já disse. */
+    private fun descartarResposta() {
+        val p = provisoria ?: return
+        provisoria = null
+        pedidosDaIa++ // a resposta e o prazo dela não chegam mais
+        vezDaIa++ // a voz, se já estiver gravando, não toca
+        falhas = 0 // uma nova tentativa que estava pra sair não conta contra a próxima resposta
+        if (p.chegou) motor?.descartar() else motor?.cancelar()
+        _conversa.value = _conversa.value?.copy(suaVez = true, pensando = false)
+    }
+
+    /** A pessoa parou de fazer som: depois da pausa ([pausaPraPensar]), a vez passa pra IA ([fimDaVez]). Só barulho, sem palavra, não. */
+    private fun agendarFimDaVez() {
+        handler.removeCallbacks(fimDaVez)
+        val c = _conversa.value ?: return
+        if ((!c.suaVez && provisoria?.segurada != true) || textoDaVez.isBlank()) return
+        // Na pergunta "quer continuar?", a resposta decide na hora (não tem volta): pausa maior
+        handler.postDelayed(fimDaVez, if (c.perguntandoSeContinua) PAUSA_NO_MEIO_MS else pausaPraPensar(textoDaVez))
     }
 
     /**
-     * A pessoa terminou uma frase ([texto]): junta com as anteriores desta vez e espera [FIM_DA_FALA_MS] de silêncio
-     * ([ouviuNaConversa]) pra ver se ela continua. O reconhecedor fecha a frase na primeira pausa: sem isso, a IA
-     * respondia a metade da resposta.
+     * A pessoa parou de falar ([pausaPraPensar] sem som): o que ela disse vai pra IA, que já começa a pensar; se ela
+     * voltar a falar antes de a voz começar, a resposta vai fora ([textoNaConversa]). Se ela só fez barulho, sem
+     * palavra nova, vale a resposta segurada. Com a meta da conversa cumprida, em vez da IA vem a pergunta se ela
+     * quer continuar (uma vez só); na pergunta, a resposta decide; depois do tempo extra, acaba.
      */
-    private fun respondeuNaConversa(texto: String) {
-        if (_conversa.value?.suaVez != true || etapa != EtapaDaManha.CONVERSA || texto.isBlank()) return
-        falaJunta = "$falaJunta $texto".trim()
-        falaAberta = "" // era esta frase, agora terminada
-        ouviuNaConversa()
-    }
-
-    /**
-     * A pessoa parou de falar ([FIM_DA_FALA_MS] sem som depois da última frase): a fala inteira vai pra IA. Com a meta
-     * da conversa cumprida, em vez da IA vem a pergunta se ela quer continuar (uma vez só); na pergunta, a resposta
-     * decide; depois do tempo extra, acaba.
-     */
-    private val fimDaFala = Runnable {
-        val c = _conversa.value?.takeIf { it.suaVez && etapa == EtapaDaManha.CONVERSA } ?: return@Runnable
-        val texto = "$falaJunta $falaAberta".trim()
-        falaJunta = ""
-        falaAberta = ""
-        if (texto.isBlank()) return@Runnable
-        Log.i(TAG, "Conversa: ele respondeu (${texto.length} letras), ${conversadoMs / 1000} s de ${c.metaMs / 1000}")
+    private val fimDaVez = Runnable {
+        val c = _conversa.value?.takeIf { (it.suaVez || provisoria?.segurada == true) && etapa == EtapaDaManha.CONVERSA } ?: return@Runnable
+        val texto = textoDaVez
+        if (fazendoSom || texto.isBlank()) return@Runnable
         _conversa.value = c.copy(suaVez = false, pensando = true)
+        provisoria?.takeIf { quantasPalavras(texto) <= quantasPalavras(it.texto) }?.let { p ->
+            Log.i(TAG, "Conversa: ele só fez barulho, vale a resposta que a IA já ${if (p.gravada) "tinha" else "está pensando"}")
+            p.segurada = false
+            if (p.gravada) tocarFalaDaIa(p.fala, p.arquivo)
+            return@Runnable
+        }
+        descartarResposta()
+        _conversa.value = c.copy(suaVez = false, pensando = true)
+        Log.i(TAG, "Conversa: ele parou (${texto.length} letras, ${escuta?.resumo()}), ${conversadoMs / 1000} s de ${c.metaMs / 1000}")
         when {
             c.perguntandoSeContinua -> respondeuSeContinua(texto)
-            conversadoMs < c.metaMs -> responderNaIa(texto)
+            conversadoMs < c.metaMs -> {
+                provisoria = Provisoria(texto)
+                responderNaIa(texto)
+            }
             extras == 0 -> perguntarSeContinua(texto)
             else -> terminarConversa("tempo de conversa completo, com o extra")
         }
@@ -1156,7 +1261,7 @@ class AlarmeService : Service() {
         respostaSemRetorno = resposta
         _conversa.value = _conversa.value?.copy(falaDaIa = FALA_CONTINUAR, pensando = false, perguntandoSeContinua = true)
         val rodada = rodadaConversa
-        sirene.falar(voz?.fixa(FALA_DE_CONTINUAR)) { if (rodada == rodadaConversa) suaVezNaConversa() }
+        falarNaConversa(voz?.fixa(FALA_DE_CONTINUAR)) { if (rodada == rodadaConversa) suaVezNaConversa() }
     }
 
     /** A resposta ao "quer continuar?": sim ([querContinuar]), a meta sobe e a IA responde as duas falas; não, ou sem entender, acaba. */
@@ -1177,7 +1282,8 @@ class AlarmeService : Service() {
         if (etapa != EtapaDaManha.CONVERSA) return
         Log.i(TAG, "Conversa: fim ($motivo), ${conversadoMs / 1000} s de conversa")
         handler.removeCallbacks(tiqueDaConversa)
-        handler.removeCallbacks(fimDaFala)
+        handler.removeCallbacks(fimDaVez)
+        pararEscuta()
         motor?.desligar()
         motor = null
         MotorDaConversa.liberar() // antes da caminhada: menos memória e menos calor
@@ -1268,12 +1374,12 @@ class AlarmeService : Service() {
         sirene.ondas(false)
         sirene.manterAcordado(false)
         handler.removeCallbacks(tiqueDaConversa)
-        handler.removeCallbacks(fimDaFala)
+        handler.removeCallbacks(fimDaVez)
         handler.removeCallbacks(vigiaDaCaminhada)
         handler.removeCallbacks(esperaDaDecisao)
+        descartarResposta() // uma resposta que já tinha chegado e não foi dita: a IA fica sabendo
+        pararEscuta()
         iaFalando = false
-        falaJunta = ""
-        falaAberta = ""
         saudacaoTerminou = false
         _conversa.value = null
         _caminhada.value = null
@@ -1284,6 +1390,15 @@ class AlarmeService : Service() {
         } else {
             motor?.cancelar() // a conversa fica, com o histórico
         }
+    }
+
+    /** A [escuta] desliga (fim da conversa, a música voltou ou o alarme acabou): microfone e reconhecedor soltos. */
+    private fun pararEscuta() {
+        escuta?.parar()
+        escuta = null
+        textoDaVez = ""
+        fazendoSom = false
+        provisoria = null
     }
 
     /** Alarme novo (ou um que não é mais "conversa + caminhada"): a manhã começa do zero. */
@@ -1323,6 +1438,7 @@ class AlarmeService : Service() {
         Log.i(TAG, "Serviço: alarme cumprido")
         handler.removeCallbacksAndMessages(null) // nenhuma renovação atrasada pode rearmar a retomada
         rodadaConversa++ // nem a IA nem uma voz atrasada da conversa falam mais
+        pararEscuta()
         motor?.desligar()
         motor = null
         MotorDaConversa.liberar()

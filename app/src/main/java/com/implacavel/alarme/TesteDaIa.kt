@@ -44,7 +44,7 @@ private val MANCHETES_DE_TESTE = listOf(
 
 // Respostas de quem acabou de acordar: duas com assunto, duas curtas (o assunto morreu: aí ela pode trocar) e o pedido de dormir
 private val FALAS_DE_TESTE = listOf(
-    PEDIDO_DE_ABERTURA,
+    pedidoDeAbertura(MANCHETES_DE_TESTE),
     "Really? I didn't know that. Why is that happening?",
     "I think it's bad for normal people, everything is getting more expensive.",
     "Yeah.",
@@ -68,7 +68,8 @@ class TesteDaIa : BroadcastReceiver() {
         val fim = goAsync()
         thread(name = "teste-da-ia") {
             try {
-                testar(ctx.applicationContext, arquivo.path, intent.getIntExtra("tokens", CONTEXTO_TOKENS))
+                if (intent.getBooleanExtra("cancelar", false)) testarCancelamento(ctx.applicationContext, arquivo.path)
+                else testar(ctx.applicationContext, arquivo.path, intent.getIntExtra("tokens", CONTEXTO_TOKENS))
             } catch (e: Throwable) {
                 Log.w(TAG, "IA teste: falhou (${e.javaClass.simpleName}: ${e.message?.take(160)})")
             } finally {
@@ -130,6 +131,57 @@ class TesteDaIa : BroadcastReceiver() {
             }
         }
         Log.i(TAG, "IA teste: fim em ${SystemClock.elapsedRealtime() - inicio} ms (calor ${calor(ctx)})")
+    }
+
+    /**
+     * Cancelar uma resposta no meio estraga a conversa? Uma fala inteira, outra cancelada no meio (uma vez já
+     * escrevendo, outra ainda lendo), e uma pergunta sobre o que só estava na cancelada: se a IA souber, o cancelado
+     * ficou na memória dela. Escreve no log as respostas e o tamanho da conversa (tokens) a cada passo.
+     */
+    private fun testarCancelamento(ctx: Context, caminho: String) {
+        Engine(EngineConfig(modelPath = caminho, backend = Backend.CPU(), maxNumTokens = CONTEXTO_TOKENS, cacheDir = ctx.cacheDir.path)).use { engine ->
+            engine.initialize()
+            val config = ConversationConfig(
+                systemInstruction = Contents.of("You are a friendly assistant. Answer in one short sentence."),
+                samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.1),
+                prefillPrefaceOnInit = true,
+                maxOutputToken = 60,
+                thinkingConfig = ThinkingConfig(enableThinking = false),
+            )
+            fun texto(m: com.google.ai.edge.litertlm.Message) = m.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
+            // (nome, quanto espera pra cancelar, quanto espera depois do cancelamento antes do próximo pedido)
+            for ((nome, cancelaMs, esperaMs) in listOf(Triple("escrevendo, espera 500 ms", 1_500L, 500L), Triple("escrevendo, pede na hora", 1_500L, 0L), Triple("lendo, espera 500 ms", 30L, 500L))) {
+                engine.createConversation(config).use { c ->
+                    c.sendMessage("Hi! I'm getting ready for work, I'm a nurse.")
+                    val antesTokens = c.getTokenCount()
+                    val acabou = java.util.concurrent.CountDownLatch(1)
+                    val partes = StringBuilder()
+                    var primeiraEm = 0L
+                    val pediu = SystemClock.elapsedRealtime()
+                    c.sendMessageAsync(
+                        "My dog is called Max. Tell me a long story about Max.",
+                        object : com.google.ai.edge.litertlm.MessageCallback {
+                            override fun onMessage(message: com.google.ai.edge.litertlm.Message) {
+                                if (primeiraEm == 0L) primeiraEm = SystemClock.elapsedRealtime() - pediu
+                                partes.append(texto(message))
+                            }
+                            override fun onDone() { acabou.countDown() }
+                            override fun onError(throwable: Throwable) { acabou.countDown() }
+                        },
+                    )
+                    Thread.sleep(cancelaMs)
+                    c.cancelProcess()
+                    acabou.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                    Thread.sleep(esperaMs)
+                    Log.i(TAG, "IA teste: cancelar ($nome): 1ª palavra em $primeiraEm ms, escreveu \"${partes.take(60)}\", tokens $antesTokens -> ${c.getTokenCount()}")
+                    for (pergunta in listOf("What is my dog's name? If I never told you, say exactly: I don't know.", "What is my job?")) {
+                        val antes = SystemClock.elapsedRealtime()
+                        val resposta = runCatching { texto(c.sendMessage(pergunta)) }.getOrElse { "ERRO ${it.message?.take(80)}" }
+                        Log.i(TAG, "IA teste: cancelar ($nome), \"$pergunta\" -> \"$resposta\" (${c.getTokenCount()} tokens, ${SystemClock.elapsedRealtime() - antes} ms)")
+                    }
+                }
+            }
+        }
     }
 
     private fun memoriaLivreMb(ctx: Context): Long =
