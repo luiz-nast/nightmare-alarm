@@ -1356,13 +1356,14 @@ class AlarmeService : Service() {
 
     /**
      * Vigia da caminhada: parado depois do prazo pra sair (ou sem GPS, dentro de casa, com a localização desligada),
-     * um bipe a cada [ENTRE_BIPES_PARADO_MS], mais alto até o máximo, até voltar a andar. Não zera nada.
+     * um bipe a cada [ENTRE_BIPES_PARADO_MS], um degrau mais alto, até o máximo no bipe [BIPES_PARADO_ATE_O_MAXIMO]
+     * (41 s parado), até voltar a andar. Não zera nada.
      */
     private val vigiaDaCaminhada = object : Runnable {
         override fun run() {
             bipesParado++
             Log.i(TAG, "Caminhada: parado depois do prazo pra sair, bipe $bipesParado")
-            sirene.bipe(bipesParado)
+            sirene.bipe(bipesParado, BIPES_PARADO_ATE_O_MAXIMO)
             handler.postDelayed(this, ENTRE_BIPES_PARADO_MS)
         }
     }

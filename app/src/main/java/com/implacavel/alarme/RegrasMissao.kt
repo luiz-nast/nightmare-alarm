@@ -158,11 +158,12 @@ fun segundosParaZerar(semOlharMs: Long): Int? =
 
 /**
  * Volume de alarme do celular no bipe número [n] (1 = o primeiro), num celular com [maximo] degraus:
- * sobe por igual a cada bipe, do levinho (1/6 do máximo) ao último, no máximo. Os degraus do Android
- * já seguem o ouvido (cada um, uns dB a mais), e o bipe passa por cima da trava do volume do alarme.
+ * sobe por igual a cada bipe, do levinho (1/[degraus] do máximo) ao bipe [degraus], no máximo (na câmera e na
+ * conversa, [BIPES_ATE_ZERAR]; na caminhada, [BIPES_PARADO_ATE_O_MAXIMO]). Os degraus do Android já seguem o ouvido
+ * (cada um, uns dB a mais), e o bipe passa por cima da trava do volume do alarme.
  */
-fun volumeDoBipe(n: Int, maximo: Int): Int =
-    (maximo * n.coerceIn(1, BIPES_ATE_ZERAR).toFloat() / BIPES_ATE_ZERAR).roundToInt().coerceAtLeast(1)
+fun volumeDoBipe(n: Int, maximo: Int, degraus: Int = BIPES_ATE_ZERAR): Int =
+    (maximo * n.coerceIn(1, degraus).toFloat() / degraus).roundToInt().coerceAtLeast(1)
 
 /** Sites que a página do YouTube abre: o próprio YouTube e o Google (aviso de cookies e login). */
 private val SITES_DA_PAGINA = listOf("youtube.com", "youtu.be", "google.com", "google.com.br")

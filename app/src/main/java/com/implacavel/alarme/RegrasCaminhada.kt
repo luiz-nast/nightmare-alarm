@@ -10,6 +10,12 @@
 // não sai dali). Medido no S24 FE (10-17): parado, a posição crua escorregou 15 m em 70 s dizendo ±1 m de precisão,
 // e a velocidade ficou em 0,00; andando em volta da piscina, a velocidade dava ~1,1 m/s e a posição andava junto (8°
 // de diferença na direção, no meio).
+//
+// Duas contas separadas: o que SOMA (só a caminhada que o GPS confirma, ou os passos logo depois dela) e o que CALA
+// OS BIPES (qualquer sinal de vida: passo no ritmo, ou o GPS vendo velocidade de andar). Num corredor coberto o GPS
+// não vê a velocidade, e o dono andava (até correndo) ouvindo "parado" e bipes cada vez mais altos (10-17, à noite,
+// com vizinho e família ouvindo): isso não pode. Quem balança o celular na cama não soma, mas também não ouve bipe:
+// está acordado, e o alarme só desliga andando de verdade.
 package com.implacavel.alarme
 
 import java.util.Locale
@@ -24,8 +30,8 @@ import kotlin.math.sqrt
 /** Tempo andando pra desligar o alarme com caminhada: parado, o relógio não anda. */
 const val CAMINHADA_MS = 16 * 60_000L
 
-/** No botão "Testar conversa + caminhada", 8 min: dá pra sentir a regra do GPS andando de verdade. */
-const val CAMINHADA_TESTE_MS = 8 * 60_000L
+/** No botão "Test talk + walk", 3 min: dá pra sentir a regra do GPS andando de verdade (8 min era insuportável). */
+const val CAMINHADA_TESTE_MS = 3 * 60_000L
 
 /** Depois da conversa, o prazo pra se vestir e sair de casa: andar nele já conta, e parado não bipa. */
 const val PRAZO_SAIR_MS = 4 * 60_000L
@@ -33,12 +39,19 @@ const val PRAZO_SAIR_MS = 4 * 60_000L
 const val PRAZO_SAIR_TESTE_MS = 30_000L
 
 /**
- * Depois do prazo pra sair, parado (sem sinal de "andando") por esse tempo: um bipe ([primeiroBipeParado]);
- * depois, um a cada [ENTRE_BIPES_PARADO_MS], cada um mais alto até o máximo, até voltar a andar. Não zera nada.
+ * Depois do prazo pra sair, parado (sem sinal de vida: nem passo, nem velocidade no GPS, [Avaliacao.valeProBipe]) por
+ * esse tempo: um bipe fraco ([primeiroBipeParado]); depois, um a cada [ENTRE_BIPES_PARADO_MS], um degrau de volume
+ * mais alto, até o máximo no bipe [BIPES_PARADO_ATE_O_MAXIMO] (aos [PARADO_MAXIMO_MS]: 41 s), com o som forte, até
+ * voltar a andar. Não zera nada. Pedido do dono (10-17): "20 segundos tranquilo sem beep, beep fraco em 23 s
+ * crescendo de 3 em 3 s até 40 s virar o insuportável", tudo na tela ([bipeDoParado], [textoDoParado]).
  */
-const val PARADO_MS = 10_000L
+const val PARADO_MS = 23_000L
 
 const val ENTRE_BIPES_PARADO_MS = 3_000L
+
+const val BIPES_PARADO_ATE_O_MAXIMO = 7
+
+const val PARADO_MAXIMO_MS = PARADO_MS + (BIPES_PARADO_ATE_O_MAXIMO - 1) * ENTRE_BIPES_PARADO_MS
 
 /** Fixo com incerteza maior que isso (dentro de casa, entre prédios) não conta. Era 25 m: na cama, perto da janela, passava. */
 const val PRECISAO_MAX_M = 20f
@@ -59,6 +72,13 @@ private const val VELOCIDADE_MAX = 4.0f
 private const val PRECISAO_VELOCIDADE_MAX = 1.0f
 private const val FIXOS_DA_VELOCIDADE = 5
 
+/**
+ * Sem passo reconhecido (o celular parado na mão, o acelerômetro perdeu o ritmo: na caminhada de 10-17 à noite, 15
+ * de 30 s com o GPS a 0,8 m/s), o GPS sozinho ainda conta, se confirmar ([andou]) e até esta velocidade: a de quem
+ * anda apressado. Mais rápido sem passo é bicicleta.
+ */
+private const val SEM_PASSO_VELOCIDADE_MAX = 2.0f
+
 /** Mais rápido que [VELOCIDADE_MAX] por esse tempo: de carro, e nada conta por [RAPIDO_SEM_CONTAR_MS]. */
 private const val RAPIDO_POR_MS = 3_000L
 private const val RAPIDO_SEM_CONTAR_MS = 30_000L
@@ -69,10 +89,8 @@ private const val CADENCIA_MAX = 200f
 
 /**
  * A passada (metros por passo: a velocidade do GPS dividida pelos passos do acelerômetro) de quem anda a pé: andando
- * normal, uns 0,7 m; correndo, até 1,3 m. Mais curta, os passos não levam a lugar nenhum (andar no lugar); mais longa,
- * o celular anda mais que as pernas (bicicleta, carro devagar).
+ * normal, uns 0,7 m; correndo, até 1,3 m. Mais longa, o celular anda mais que as pernas (bicicleta, carro devagar).
  */
-private const val PASSADA_MIN_M = 0.30f
 private const val PASSADA_MAX_M = 1.40f
 
 /**
@@ -82,17 +100,16 @@ private const val PASSADA_MAX_M = 1.40f
 private const val JANELA_MS = 12_000L
 
 /**
- * A direção: na janela (até [RUMOS_USADOS] fixos com velocidade de pelo menos [RUMO_VELOCIDADE_MIN] e rumo com
- * incerteza até [RUMO_PRECISAO_MAX]), a soma dos rumos pesados pela velocidade tem que apontar pra algum lado: a
- * coerência ([coerencia]) passa de [COERENCIA_MIN]. Andando reto dá ~0,95; nas curvas da piscina passou de 0,5 em
- * 87 a 93% dos segundos; o braço balançando dá rumo pra todo lado, perto de 0. Com menos de [RUMOS_MIN] rumos, ainda
- * não dá pra saber.
+ * A direção, só pro log: na janela (até [RUMOS_USADOS] fixos com velocidade de pelo menos [RUMO_VELOCIDADE_MIN] e
+ * rumo com incerteza até [RUMO_PRECISAO_MAX]), quanto a soma dos rumos pesados pela velocidade aponta pra algum lado
+ * ([coerencia]). Andando reto dá ~0,95; nas curvas da piscina passou de 0,5 em 87 a 93% dos segundos; o braço
+ * balançando dá rumo pra todo lado, perto de 0. Com menos de [RUMOS_MIN] rumos, null. Quem decide é [andou], que já
+ * exige que a velocidade e o rumo somados cheguem a algum lugar.
  */
 private const val RUMOS_USADOS = 6
 private const val RUMOS_MIN = 5
 private const val RUMO_VELOCIDADE_MIN = 0.3f
 private const val RUMO_PRECISAO_MAX = 45f
-private const val COERENCIA_MIN = 0.5
 
 /**
  * Andou de verdade ([andou]): na janela (cobrindo pelo menos [ANDOU_JANELA_MIN_MS]), o ponto do GPS (da média dos
@@ -118,17 +135,26 @@ private const val ANDOU_LISO_MIN = 0.4
 private const val SALTO_FOLGA_M = 10.0
 
 /**
- * Andando, mas o GPS ainda sem confirmar que saiu do lugar ([andou]), os segundos ficam "conferindo" (pendentes) e
- * somam todos de uma vez na próxima confirmação. Por até [CONFERINDO_MAX_MS]: sem confirmar nesse tempo, o GPS não
- * vê a pessoa sair do lugar (o celular balançando, ou dentro de casa), e não somam: os bipes voltam. Parado por
- * [CONFERINDO_RECOMECA_MS], a conferência recomeça do zero.
+ * Andando (passos no ritmo, ou o GPS vendo velocidade), mas o GPS ainda sem confirmar que saiu do lugar ([andou]), os
+ * segundos ficam "conferindo" (pendentes) e somam todos de uma vez na próxima confirmação. Por até [CONFERINDO_MAX_MS]:
+ * sem confirmar nesse tempo, o GPS não vê a pessoa sair do lugar (o celular balançando, ou dentro de casa), e não
+ * somam ("não saiu do lugar", em vermelho na tela; os bipes só voltam sem passo nenhum). Parado de verdade por
+ * [CONFERINDO_RECOMECA_MS], a conferência e a confiança recomeçam do zero.
  */
 private const val CONFERINDO_MAX_MS = 60_000L
 private const val CONFERINDO_RECOMECA_MS = 30_000L
 
 /**
+ * A confiança: cada segundo que o GPS confirma andando guarda um segundo (até este tanto), e os passos no ritmo
+ * sem o GPS confirmar (um corredor coberto, o GPS perdendo a velocidade por um trecho) gastam dela e somam direto,
+ * sem esperar. Quem só balança o celular na cama não tem confiança (nunca saiu do lugar) e não soma nada; quem andou
+ * na rua 1 min e deitou pra balançar ganha no máximo esse 1 min, e o anel para: só andando de verdade o alarme desliga.
+ */
+private const val CONFIANCA_MAX_MS = 90_000L
+
+/**
  * Nos primeiros segundos andando, o GPS ainda está percebendo (a velocidade sobe em 2 a 4 s, o rumo vem logo
- * depois): por esse tempo, sem velocidade de andar é "começando", não "no lugar".
+ * depois): por esse tempo, sem velocidade de andar é "começando", não "no lugar" (só muda a mensagem da tela).
  */
 private const val COMECANDO_MS = 8_000L
 
@@ -190,9 +216,10 @@ fun emMetros(origem: Fixo, fixo: Fixo): Pair<Double, Double> {
  * Os passos, pelo acelerômetro (~50 amostras por segundo, o tamanho da aceleração em m/s²; o jeito de "Bangle.js"
  * e dos contadores de passo do Android): tira a gravidade (a média lenta), suaviza, e cada pico forte o bastante
  * é um passo. Andando ([andando]) depois de [PASSOS_PRA_ANDAR] passos seguidos no ritmo de quem anda (um a cada 0,3
- * a 1 s); para depois de [SEM_PASSO_PRA_PARAR_MS] sem passo, ou com dois picos colados (sacudir rápido). Na gravação
- * de 10-17: andando, reconheceu 97% dos segundos; parado, nenhum. Sacudir o celular devagar, sentado, também passa
- * às vezes (43% dos segundos): quem barra isso é o GPS.
+ * a 1 s); para depois de [SEM_PASSO_PRA_PARAR_MS] sem passo. Dois picos colados (menos de [COLADO_MS]) são um passo
+ * só: o segundo é ignorado (era um "para", e correndo, ou com o celular na mão, derrubava o ritmo e pedia 6 passos
+ * novos: segundos de "parado" andando). Na gravação de 10-17: andando, reconheceu 97% dos segundos; parado, nenhum.
+ * Sacudir o celular, sentado, também passa: quem barra isso é o GPS.
  */
 class DetectorDePassos {
     private var gravidade = Float.NaN
@@ -239,8 +266,8 @@ class DetectorDePassos {
 
     private fun passo(quando: Long) {
         val anterior = ultimoPasso
-        // Rápido demais pra ser passo: é o celular sacudido (andando, aconteceu 1 vez em 7 min); o ritmo recomeça
-        if (anterior != null && quando - anterior < COLADO_MS) return parar()
+        // Colado no passo anterior: é o mesmo passo (o calcanhar e a ponta do pé), não dois
+        if (anterior != null && quando - anterior < COLADO_MS) return
         if (anterior != null && quando - anterior <= INTERVALO_MAX_MS) {
             seguidos++
             intervalos.addLast(quando - anterior)
@@ -273,7 +300,7 @@ class DetectorDePassos {
         const val ATIVIDADE_MIN = 0.5f // desvio em 1 s: parado dá 0,01; andando, 1 a 2,5
         const val PICO_MIN = 0.5f
         const val PICO_FATOR = 0.6f // do desvio em 2 s
-        const val COLADO_MS = 300L // dois picos mais perto que isso não são dois passos
+        const val COLADO_MS = 300L // dois picos mais perto que isso são um passo só
         const val INTERVALO_MAX_MS = 1_000L // mais longe, o ritmo recomeça
         const val PASSOS_PRA_ANDAR = 6 // uns 3 s
         const val SEM_PASSO_PRA_PARAR_MS = 2_000L
@@ -359,11 +386,12 @@ class Trilho {
 data class Deslocamento(val pelaPosicao: Double, val pelaVelocidade: Double, val confirma: Boolean)
 
 /**
- * O que um fixo diz da caminhada: o [movimento] e por quê ([motivo], curto, pro log e pra tela: "parado", "rumo"…);
- * quanto ele [soma] no tempo andado (ms: o tempo desde o fixo anterior, mais os segundos que estavam conferindo, de
- * uma vez); quanto está [conferindo] (ms, ainda sem somar); se [valeProBipe] (andando de verdade: os bipes de parado
- * calam); e, pro log e pra tela, a [velocidade] do GPS (a mediana, m/s), a [cadencia] (passos por minuto), a
- * [passada] (m), a [coerencia] do rumo, o [deslocamento] na janela e o [ponto] do caminho.
+ * O que um fixo diz da caminhada: o [movimento] e por quê ([motivo], curto, pro log e pra tela: "parado", "no
+ * lugar"…); quanto ele [soma] no tempo andado (ms: o tempo desde o fixo anterior, mais os segundos que estavam
+ * conferindo, de uma vez); quanto está [conferindo] (ms, ainda sem somar); se [valeProBipe] (sinal de vida: passo no
+ * ritmo, ou o GPS vendo velocidade de andar; os bipes de parado calam, somando ou não); quanto há de [confianca] (ms,
+ * veja [CONFIANCA_MAX_MS]); e, pro log e pra tela, a [velocidade] do GPS (a mediana, m/s), a [cadencia] (passos por
+ * minuto), a [passada] (m), a [coerencia] do rumo, o [deslocamento] na janela e o [ponto] do caminho.
  */
 data class Avaliacao(
     val movimento: Movimento,
@@ -377,14 +405,17 @@ data class Avaliacao(
     val coerencia: Double? = null,
     val deslocamento: Deslocamento? = null,
     val ponto: Pair<Double, Double>? = null,
+    val confianca: Long = 0,
 )
 
 /**
  * A caminhada: recebe o acelerômetro ([acelerometro]) e os fixos do GPS ([fixo]) e diz, a cada fixo, se a pessoa
- * está andando a pé e quanto somar. Um segundo é "andando agora" (candidato) se: tem passo no ritmo; a velocidade do
- * GPS é de quem anda; a passada fecha (velocidade ÷ passos); e o rumo aponta pra algum lado. E soma quando, além
- * disso, o ponto do GPS andou junto ([andou]); enquanto não confirma, fica conferindo. Nada que somou volta atrás, e
- * nada zera: um zero do GPS, um salto ou um farol só pausam. [contando] = false (o GPS esquentando antes da caminhada, na
+ * está andando a pé e quanto somar. Um segundo é "andando agora" (candidato) se tem passo no ritmo (e a passada
+ * fecha: velocidade ÷ passos, senão é bicicleta) ou, sem passo, o GPS vê velocidade de andar (até
+ * [SEM_PASSO_VELOCIDADE_MAX]). Soma quando o ponto do GPS andou junto ([andou]), ou, com passo, gastando a confiança
+ * de quem acabou de andar na área aberta ([CONFIANCA_MAX_MS]); enquanto não confirma, fica conferindo. Os bipes de
+ * parado calam em todo candidato ([Avaliacao.valeProBipe]), somando ou não. Nada que somou volta atrás, e nada zera:
+ * um zero do GPS, um salto ou um farol só pausam. [contando] = false (o GPS esquentando antes da caminhada, na
  * conversa): avalia e anda o caminho, mas não soma nem confere.
  */
 class DetectorDeCaminhada {
@@ -397,6 +428,7 @@ class DetectorDeCaminhada {
     private var conferindo = 0L
     private var conferindoDesde: Long? = null
     private var ultimoCandidato: Long? = null
+    private var confianca = 0L
 
     fun acelerometro(tempoMs: Long, tamanho: Float) = passos.amostra(tempoMs, tamanho)
 
@@ -430,26 +462,30 @@ class DetectorDeCaminhada {
             rapidoDesde = null
         }
         val comecando = passos.andandoDesde?.let { t - it < COMECANDO_MS } == true
+        val comPasso = passos.andando && cadencia != null && cadencia in CADENCIA_MIN..CADENCIA_MAX
+        val gpsAnda = velocidade != null && velocidade >= VELOCIDADE_MIN && (incerteza ?: 0f) <= PRECISAO_VELOCIDADE_MAX
+        val rapido = t < semContarAte || velocidade != null && velocidade > VELOCIDADE_MAX
         val porque = when {
-            t < semContarAte || velocidade != null && velocidade > VELOCIDADE_MAX -> "rápido"
-            !passos.andando || cadencia == null || cadencia !in CADENCIA_MIN..CADENCIA_MAX -> "parado"
-            velocidade == null || velocidade < VELOCIDADE_MIN || (incerteza ?: 0f) > PRECISAO_VELOCIDADE_MAX ->
-                if (comecando) "começando" else "no lugar"
-            passada == null || passada < PASSADA_MIN_M -> if (comecando) "começando" else "no lugar"
-            passada > PASSADA_MAX_M -> "passada longa"
-            // Sem rumo ainda (o S24 leva uns 15 s pra medir, depois de começar a andar): confere, e só soma se o
-            // ponto do GPS andar junto ([andou] precisa dos rumos, então não confirma sem eles)
-            coerencia != null && coerencia < COERENCIA_MIN -> "rumo"
-            else -> null
+            rapido -> "rápido"
+            // A perna dá ritmo, mas o celular anda mais que um passo: bicicleta, carro devagar
+            comPasso && passada != null && passada > PASSADA_MAX_M -> "passada longa"
+            comPasso -> null
+            // Sem passo reconhecido, o GPS sozinho: até o passo apressado de quem anda; mais rápido é bicicleta
+            gpsAnda && velocidade!! <= SEM_PASSO_VELOCIDADE_MAX -> null
+            gpsAnda -> "sem passo"
+            else -> "parado"
         }
-        fun avaliacao(movimento: Movimento, motivo: String, soma: Long = 0, valeProBipe: Boolean = false) = Avaliacao(
-            movimento, motivo, soma, conferindo, valeProBipe, velocidade, cadencia, passada, coerencia, deslocamento, trilho.ponto,
+        // Sinal de vida (passo no ritmo, ou o GPS vendo velocidade de andar): os bipes calam, somando ou não
+        val vivo = !rapido && (comPasso || gpsAnda)
+        fun avaliacao(movimento: Movimento, motivo: String, soma: Long = 0) = Avaliacao(
+            movimento, motivo, soma, conferindo, vivo, velocidade, cadencia, passada, coerencia, deslocamento, trilho.ponto, confianca,
         )
         if (porque != null) {
-            // Parado tempo bastante, a conferência recomeça do zero (o que estava conferindo se perde)
+            // Parado de verdade tempo bastante, a conferência e a confiança recomeçam do zero (o que estava conferindo se perde)
             if (ultimoCandidato?.let { t - it >= CONFERINDO_RECOMECA_MS } != false) {
                 conferindo = 0
                 conferindoDesde = null
+                confianca = 0
             }
             return avaliacao(if (porque == "rápido") Movimento.RAPIDO_DEMAIS else Movimento.PARADO, porque)
         }
@@ -459,7 +495,14 @@ class DetectorDeCaminhada {
             val soma = dt + conferindo
             conferindo = 0
             conferindoDesde = null
-            return avaliacao(Movimento.ANDANDO, "andando", soma, valeProBipe = true)
+            confianca = minOf(confianca + dt, CONFIANCA_MAX_MS)
+            return avaliacao(Movimento.ANDANDO, if (comPasso) "andando" else "pelo GPS", soma)
+        }
+        // Passos no ritmo e o GPS sem confirmar (um trecho coberto): a confiança de quem acabou de andar na área aberta paga
+        if (comPasso && confianca > 0) {
+            val soma = minOf(dt, confianca)
+            confianca -= soma
+            return avaliacao(Movimento.ANDANDO, "pelos passos", soma)
         }
         // Andando, mas o GPS ainda não confirmou que saiu do lugar: confere por até um minuto
         val desde = conferindoDesde ?: t.also { conferindoDesde = it }
@@ -468,7 +511,13 @@ class DetectorDeCaminhada {
             return avaliacao(Movimento.PARADO, "não saiu do lugar")
         }
         conferindo += dt
-        return avaliacao(Movimento.CONFERINDO, "conferindo", valeProBipe = true)
+        val motivo = when {
+            !comPasso -> "sem passo" // o GPS vê velocidade, o acelerômetro não vê passo
+            !gpsAnda && comecando -> "começando"
+            !gpsAnda -> "no lugar" // passos sem velocidade no GPS: dentro de casa, num corredor coberto
+            else -> "conferindo"
+        }
+        return avaliacao(Movimento.CONFERINDO, motivo)
     }
 }
 
@@ -551,6 +600,27 @@ fun primeiroBipeParado(ultimoPasso: Long, prazoAte: Long): Long = maxOf(ultimoPa
 /** Contagem na tela, parado depois do prazo pra sair: segundos até o 1º bipe (0 = já bipando). Null ainda no prazo. */
 fun segundosProBipe(agora: Long, ultimoPasso: Long, prazoAte: Long): Int? =
     if (agora < prazoAte) null else ceil((primeiroBipeParado(ultimoPasso, prazoAte) - agora) / 1000.0).toInt().coerceAtLeast(0)
+
+/** Há quanto tempo (ms) sem sinal de vida depois do prazo pra sair, pra barra do bipe na tela; null ainda no prazo. */
+fun paradoHa(agora: Long, ultimoPasso: Long, prazoAte: Long): Long? =
+    if (agora < prazoAte) null else (agora - maxOf(ultimoPasso, prazoAte)).coerceAtLeast(0)
+
+/** O número do bipe de quem está parado há [paradoMs] (0 = nenhum ainda): o 1º aos [PARADO_MS], e um a cada [ENTRE_BIPES_PARADO_MS]. */
+fun bipeDoParado(paradoMs: Long): Int = if (paradoMs < PARADO_MS) 0 else (1 + (paradoMs - PARADO_MS) / ENTRE_BIPES_PARADO_MS).toInt()
+
+/**
+ * A linha da barra do bipe, parado há [paradoMs]: "Stopped 12 s · beeps start in 11 s", "Beep 3 of 7 · maximum in
+ * 12 s", "🔊 Maximum · walk and it stops".
+ */
+fun textoDoParado(paradoMs: Long): String {
+    val bipe = bipeDoParado(paradoMs)
+    val segundos = { ms: Long -> ceil(ms / 1000.0).toInt() }
+    return when {
+        bipe == 0 -> "Stopped ${paradoMs / 1000} s · beeps start in ${segundos(PARADO_MS - paradoMs)} s"
+        bipe < BIPES_PARADO_ATE_O_MAXIMO -> "Beep $bipe of $BIPES_PARADO_ATE_O_MAXIMO · maximum in ${segundos(PARADO_MAXIMO_MS - paradoMs)} s"
+        else -> "🔊 Maximum · walk and it stops"
+    }
+}
 
 /** Aviso na tela durante o prazo pra sair: "You have 6:32 to start walking". Null depois dele. */
 fun avisoDoPrazo(agora: Long, prazoAte: Long): String? =

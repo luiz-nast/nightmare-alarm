@@ -28,10 +28,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,6 +57,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -107,10 +111,11 @@ private const val TRILHA_LADO_MIN_M = 40.0
  * na hora de sair, já está pronto (a ideia do dono; ligado só na caminhada, o 1º minuto dela era o GPS escorregando
  * e saltando). Vivem na tela do alarme, não no serviço (a localização "durante o uso" só vale com a tela aberta), e
  * passam da conversa pra caminhada sem desligar. Só a etapa da caminhada ([aoAvaliar]) soma tempo e desenha a
- * trilha; antes, o caminho anda (pra saber de onde a pessoa saiu) sem contar. Com [detalhar] (o TesteDoGps), cada
- * fixo no log ([detalheDoFixo]).
+ * trilha; antes, o caminho anda (pra saber de onde a pessoa saiu) sem contar. Cada fixo vai pro log ([detalheDoFixo],
+ * sem coordenadas): na caminhada de 10-17 à noite só havia o resumo de 30 s, e não deu pra saber por que os passos
+ * sumiram.
  */
-class SentidosDaCaminhada(private val detalhar: Boolean) {
+class SentidosDaCaminhada {
     val detector = DetectorDeCaminhada()
 
     /** A última avaliação, pra tela; null antes do primeiro fixo. */
@@ -142,7 +147,7 @@ class SentidosDaCaminhada(private val detalhar: Boolean) {
         val avaliacao = detector.fixo(atual, chegou, contando)
         resumo.somar(atual, avaliacao, chegou, ceu)
         leitura = LeituraGps(avaliacao, atual.precisaoM, chegou)
-        if (detalhar) Log.i(TAG, detalheDoFixo(detector.trilho.origem ?: atual, atual, local, chegou, avaliacao))
+        Log.i(TAG, detalheDoFixo(detector.trilho.origem ?: atual, atual, local, chegou, avaliacao))
         if (!contando) return
         avaliacao.ponto?.let { (leste, norte) ->
             val trecho = when (avaliacao.movimento) {
@@ -169,9 +174,9 @@ class SentidosDaCaminhada(private val detalhar: Boolean) {
  * permissão da localização. Sem GPS no celular, [SentidosDaCaminhada.semGps].
  */
 @Composable
-fun rememberSentidosDaCaminhada(ligado: Boolean, detalhar: Boolean = false): SentidosDaCaminhada {
+fun rememberSentidosDaCaminhada(ligado: Boolean): SentidosDaCaminhada {
     val ctx = LocalContext.current
-    val sentidos = remember { SentidosDaCaminhada(detalhar) }
+    val sentidos = remember { SentidosDaCaminhada() }
     LaunchedEffect(Unit) {
         while (true) {
             sentidos.permitida = Poder.LOCALIZACAO.liberado(ctx) // liberada nas Configurações, ou tirada no meio
@@ -239,9 +244,10 @@ fun rememberSentidosDaCaminhada(ligado: Boolean, detalhar: Boolean = false): Sen
  * por segundo) até somar [metaMs], começando de [andadoInicialMs] (o que o serviço já guardou: a tela voltou depois
  * de sair, ou foi recriada no meio). Por cima, mais claro, o que ainda está conferindo. Até [prazoAte]
  * (SystemClock.elapsedRealtime) é o prazo pra sair de casa: andar nele já conta, e a tela mostra quanto falta.
- * [onAndando] recebe o tempo já somado a cada [AVISO_ANDANDO_MS] andando e no instante em que para; depois do prazo,
- * parado, a tela mostra a contagem pro bipe a partir do último sinal recebido pelo serviço ([ultimoPasso],
- * [segundosProBipe]); os bipes são da vigia de lá.
+ * [onAndando] recebe o tempo já somado a cada [AVISO_ANDANDO_MS] com sinal de vida ([Avaliacao.valeProBipe]: passo ou
+ * velocidade no GPS, somando ou não) e no instante em que o sinal para; depois do prazo, parado, a tela mostra a
+ * contagem pro bipe a partir do último sinal recebido pelo serviço ([ultimoPasso], [segundosProBipe]); os bipes são
+ * da vigia de lá.
  *
  * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada
  * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. [onDefeito] só num
@@ -317,7 +323,7 @@ fun EtapaCaminhada(
     }
     val cor by animateColorAsState(corAlvo, label = "cor da caminhada")
     val noPrazo = if (detalhar) "GPS test: no beeps" else avisoDoPrazo(agora, prazoAte)
-    val bipeEm = if (andando) null else segundosProBipe(agora, ultimoPasso, prazoAte)
+    val paradoMs = if (andando) 0L else paradoHa(agora, ultimoPasso, prazoAte) ?: 0L
     val metaSegura = metaMs.coerceAtLeast(1)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(ANEL), contentAlignment = Alignment.Center) {
@@ -332,12 +338,11 @@ fun EtapaCaminhada(
         }
         Spacer(Modifier.height(16.dp))
         Text(status, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        // Linha sempre presente, pra tela não pular: o prazo pra sair ou, parado depois dele, a contagem pro bipe
+        // Sempre presente, pra tela não pular: o prazo pra sair ou, depois dele, a barra do bipe
         if (noPrazo != null) {
             Text(noPrazo, color = VinhoAlarme, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         } else {
-            val aviso = bipeEm?.let { if (it > 0) "Beep in $it s" else "🔊 Walk and the beep stops" }.orEmpty()
-            Text(aviso, color = VermelhoParado, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+            BarraDoBipe(paradoMs)
         }
         if (!sentidos.permitida) {
             Spacer(Modifier.height(12.dp))
@@ -355,6 +360,55 @@ fun EtapaCaminhada(
 }
 
 private val TRILHA_TAMANHO = 180.dp
+
+/**
+ * A barra do bipe, depois do prazo pra sair: o tempo parado ([paradoMs], sem sinal de vida) enche a barra de 0 a
+ * [PARADO_MAXIMO_MS] (41 s), de verde a vermelho; os [BIPES_PARADO_ATE_O_MAXIMO] traços são os bipes, cada um mais
+ * alto (o traço, como o volume), o 1º aos [PARADO_MS]. Em cima, a linha que diz onde está ([textoDoParado]); andando,
+ * a barra vazia e a linha em branco (pra tela não pular).
+ */
+@Composable
+private fun BarraDoBipe(paradoMs: Long) {
+    val fracao = (paradoMs.toFloat() / PARADO_MAXIMO_MS).coerceIn(0f, 1f)
+    val bipe = bipeDoParado(paradoMs)
+    val cor = when {
+        paradoMs == 0L -> VerdeAndando
+        bipe == 0 -> VinhoAlarme
+        bipe < BIPES_PARADO_ATE_O_MAXIMO -> lerp(VinhoAlarme, VermelhoParado, bipe.toFloat() / BIPES_PARADO_ATE_O_MAXIMO)
+        else -> VermelhoParado
+    }
+    Column(Modifier.fillMaxWidth(0.85f), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            if (paradoMs == 0L) "" else textoDoParado(paradoMs), color = cor, fontSize = 20.sp, fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(6.dp))
+        Canvas(Modifier.fillMaxWidth().height(30.dp)) {
+            val trilho = 10.dp.toPx()
+            val baseY = size.height - trilho / 2
+            val largura = size.width
+            drawLine(VinhoAlarme.copy(alpha = 0.2f), Offset(0f, baseY), Offset(largura, baseY), trilho, StrokeCap.Round)
+            if (fracao > 0f) {
+                drawLine(cor, Offset(0f, baseY), Offset(largura * fracao, baseY), trilho, StrokeCap.Round)
+            }
+            // Um traço por bipe, do fraco ao máximo: mais alto conforme o volume; aceso quando já tocou
+            for (n in 1..BIPES_PARADO_ATE_O_MAXIMO) {
+                val x = largura * (PARADO_MS + (n - 1) * ENTRE_BIPES_PARADO_MS).toFloat() / PARADO_MAXIMO_MS
+                val altura = 6.dp.toPx() + (size.height - trilho - 6.dp.toPx()) * n / BIPES_PARADO_ATE_O_MAXIMO
+                val aceso = bipe >= n
+                drawLine(
+                    if (aceso) VermelhoParado else VinhoAlarme.copy(alpha = 0.45f), Offset(x, baseY - trilho / 2 - 2.dp.toPx()),
+                    Offset(x, baseY - trilho / 2 - 2.dp.toPx() - altura), if (aceso) 4.dp.toPx() else 2.dp.toPx(), StrokeCap.Round,
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("quiet", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("beeps from ${PARADO_MS / 1000} s", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("max at ${PARADO_MAXIMO_MS / 1000} s", color = VermelhoParado.copy(alpha = 0.8f), fontSize = 12.sp)
+        }
+    }
+}
 
 /**
  * A trilha da caminhada vista de cima (norte pra cima), na escala que cabe tudo ([TRILHA_LADO_MIN_M] no mínimo):
@@ -398,19 +452,25 @@ fun gpsLigado(ctx: Context): Boolean = ctx.getSystemService(LocationManager::cla
 /** A última leitura, se ainda vale (chegou há até [FIXO_VELHO_MS]); senão null: sem sinal. */
 private fun recente(leitura: LeituraGps?, agora: Long): LeituraGps? = leitura?.takeIf { agora - it.quando <= FIXO_VELHO_MS }
 
-/** O retorno de cada leitura do GPS (null = sem sinal): cor (verde andando, verde claro conferindo, vermelho no resto) e mensagem. */
+/**
+ * O retorno de cada leitura do GPS (null = sem sinal): cor (verde andando, verde claro conferindo, vermelho no resto)
+ * e mensagem, com o porquê do jeito que a regra viu ([Avaliacao.motivo]), pra pessoa saber o que fazer.
+ */
 private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
     if (leitura == null) return VermelhoParado to "No GPS signal: go outside, away from buildings"
     val avaliacao = leitura.avaliacao
     return when (avaliacao.movimento) {
-        Movimento.ANDANDO -> VerdeAndando to "Walking ${avaliacao.velocidade?.let(::textoDaVelocidade).orEmpty()} ✓"
-        Movimento.CONFERINDO -> VerdeConferindo to "Walking… checking"
-        // O porquê, do jeito que a regra viu: pra pessoa saber o que fazer
+        Movimento.ANDANDO -> VerdeAndando to when (avaliacao.motivo) {
+            "pelos passos" -> "Walking by your steps ✓"
+            else -> "Walking ${avaliacao.velocidade?.let(::textoDaVelocidade).orEmpty()} ✓"
+        }
+        Movimento.CONFERINDO -> VerdeConferindo to when (avaliacao.motivo) {
+            "começando" -> "Starting to walk…"
+            "no lugar" -> "Steps, but the GPS does not see you move yet: open sky helps"
+            else -> "Walking… checking"
+        }
         Movimento.PARADO -> when (avaliacao.motivo) {
-            "começando" -> VerdeConferindo to "Starting to walk…"
-            "no lugar" -> VermelhoParado to "Steps in place do not count: go outside"
-            "passada longa" -> VermelhoParado to "Only on foot counts"
-            "rumo" -> VermelhoParado to "Shaking the phone does not count: walk forward"
+            "passada longa", "sem passo" -> VermelhoParado to "Only on foot counts"
             "não saiu do lugar" -> VermelhoParado to "The GPS does not see you moving: go outside"
             else -> VermelhoParado to "Stopped: walk!"
         }
@@ -489,22 +549,22 @@ private class ResumoDoGps {
 }
 
 /**
- * Uma linha do log por fixo, no TesteDoGps: onde o [atual] cru está, em metros a leste e ao norte da [origem] do
- * caminho (sem as coordenadas: privacidade), a precisão, a velocidade e o rumo medidos (com as incertezas), o atraso
- * do fixo; e o que a regra disse: o movimento e o porquê, o ponto do caminho, a velocidade do meio, os passos por
- * minuto, a passada, a coerência do rumo, quanto andou na janela (pela posição / pela velocidade, ✓ confirmou), quanto
- * somou e quanto está conferindo.
+ * Uma linha do log por fixo: onde o [atual] cru está, em metros a leste e ao norte da [origem] do caminho (sem as
+ * coordenadas: privacidade), a precisão, a velocidade e o rumo medidos (com as incertezas), o atraso do fixo; e o que
+ * a regra disse: o movimento e o porquê, o ponto do caminho, a velocidade do meio, os passos por minuto, a passada, a
+ * coerência do rumo, quanto andou na janela (pela posição / pela velocidade, ✓ confirmou), quanto somou, quanto está
+ * conferindo e a confiança guardada.
  */
 private fun detalheDoFixo(origem: Fixo, atual: Fixo, local: Location, chegou: Long, a: Avaliacao): String {
     val (leste, norte) = emMetros(origem, atual)
     fun num(v: Number?, casas: Int = 1) = v?.let { String.format(Locale.ROOT, "%.${casas}f", it.toDouble()) } ?: "-"
     val rumoIncerteza = if (local.hasBearingAccuracy()) local.bearingAccuracyDegrees else null
     return String.format(
-        Locale.ROOT, "GPS %+7.1f L %+7.1f N ±%s v %s±%s r %s±%s atraso %d -> %s %s | caminho %s %s v %s passos %s passada %s coer %s andou %s/%s%s soma %d conf %d",
+        Locale.ROOT, "GPS %+7.1f L %+7.1f N ±%s v %s±%s r %s±%s atraso %d -> %s %s | caminho %s %s v %s passos %s passada %s coer %s andou %s/%s%s soma %d conf %d confiança %d",
         leste, norte, num(atual.precisaoM), num(atual.velocidadeMs, 2), num(atual.precisaoVelocidade, 2), num(atual.rumo, 0), num(rumoIncerteza, 0),
         chegou - atual.tempoMs, a.movimento, a.motivo, num(a.ponto?.first), num(a.ponto?.second), num(a.velocidade, 2), num(a.cadencia, 0),
         num(a.passada, 2), num(a.coerencia, 2), num(a.deslocamento?.pelaPosicao), num(a.deslocamento?.pelaVelocidade),
-        if (a.deslocamento?.confirma == true) " ✓" else "", a.soma, a.conferindo,
+        if (a.deslocamento?.confirma == true) " ✓" else "", a.soma / 1000, a.conferindo / 1000, a.confianca / 1000,
     )
 }
 

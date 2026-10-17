@@ -13,7 +13,7 @@ class ConversaTest {
     @Test
     fun conversaPede10MinutosETeste5() {
         assertEquals(10 * 60_000L, metaConversa(Alarme(1, 7, 0, caminhada = true)))
-        assertEquals(5 * 60_000L, metaConversa(Alarme.teste(caminhada = true)))
+        assertEquals(3 * 60_000L, metaConversa(Alarme.teste(caminhada = true)))
         assertEquals(3 * 60_000L, extraDaConversa(Alarme(1, 7, 0, caminhada = true)))
         assertEquals(20_000L, extraDaConversa(Alarme.teste(caminhada = true)))
     }

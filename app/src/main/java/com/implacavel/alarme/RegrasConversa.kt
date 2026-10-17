@@ -12,8 +12,8 @@ import java.util.Locale
 /** Tempo de conversa "pura" (a voz da IA ou a pessoa falando) pra fechar a conversa. */
 const val CONVERSA_MS = 10 * 60_000L
 
-/** No botão de teste, a conversa pede só isto (dá pra sentir se a conversa flui). */
-const val CONVERSA_TESTE_MS = 5 * 60_000L
+/** No botão de teste, a conversa pede só isto (dá pra sentir se a conversa flui; com 5 min o teste todo ficava longo). */
+const val CONVERSA_TESTE_MS = 3 * 60_000L
 
 /** A pessoa quis conversar mais: a meta sobe isto. */
 const val CONVERSA_EXTRA_MS = 3 * 60_000L

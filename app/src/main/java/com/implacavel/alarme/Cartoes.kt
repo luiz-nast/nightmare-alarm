@@ -135,7 +135,7 @@ fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -
         OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Test camera + phrases") }
         OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Test talk + walk") }
         Text(
-            "Camera + phrases: 30 s of camera, with the phrases in the middle. Talk + walk: 5 min of talk, 30 s to go out and 8 min of walking.",
+            "Camera + phrases: 30 s of camera, with the phrases in the middle. Talk + walk: 3 min of talk, 30 s to go out and 3 min of walking. Test beeps are quiet.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )

@@ -28,11 +28,17 @@ class App : Application() {
         Ajustes.carregar(this)
         Notificacoes.criarCanal(this)
         // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta em instantes, e
-        // a missão continua de onde estava ([Ajustes.progresso]). Vale pro teste também; pra encerrar um no meio, só
-        // pelo cabo ([PararPeloCabo])
+        // a missão continua de onde estava ([Ajustes.progresso]). Um teste não volta: o dono desligou o celular pra
+        // fugir dos bipes de um teste (10-17), e ele voltou depois do reinício tocando o toque do sistema. Pra encerrar
+        // um alarme de verdade no meio, só pelo cabo ([PararPeloCabo])
         Ajustes.emAndamento?.let {
-            Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
-            Agendador.agendarRetomada(this, 2_000)
+            if (it.alarme.deTeste) {
+                Log.i(TAG, "Teste ${it.alarme.id} foi interrompido no meio: fica por isso mesmo")
+                Ajustes.emAndamento = null
+            } else {
+                Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
+                Agendador.agendarRetomada(this, 2_000)
+            }
         }
         // O processo morreu na comemoração de um alarme cumprido: devolve o volume de antes dele
         if (Ajustes.emAndamento == null) Ajustes.volumeParaDevolver?.let {

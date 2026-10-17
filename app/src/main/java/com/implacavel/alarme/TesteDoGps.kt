@@ -120,7 +120,7 @@ class TesteDoGps : ComponentActivity() {
         Log.i(TAG, "Teste GPS: começou, $minutos min")
         setContent {
             TemaImplacavel {
-                val sentidos = rememberSentidosDaCaminhada(ligado = true, detalhar = true)
+                val sentidos = rememberSentidosDaCaminhada(ligado = true)
                 Column(
                     Modifier.fillMaxSize().background(Color(0xFFFDECEA)).verticalScroll(rememberScrollState()).padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

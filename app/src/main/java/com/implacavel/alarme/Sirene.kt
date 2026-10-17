@@ -174,15 +174,18 @@ class Sirene(private val ctx: Context) {
      * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte. No teste, param
      * no volume dos avisos (40%). Devolve quanto o bipe dura (ms), pra conversa não ouvir o próprio bipe.
      */
-    fun bipe(n: Int, som: Int = if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe): Long {
+    fun bipe(n: Int, degraus: Int = BIPES_ATE_ZERAR, som: Int = if (n >= degraus) R.raw.bipe_final else R.raw.bipe): Long {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        // No teste (em casa, com gente dormindo), os bipes param no volume dos avisos (40%); no alarme, vão ao máximo
-        val degrau = volumeDoBipe(n, maximo).let { if (foto?.alarme?.deTeste == true) minOf(it, volumeDosAvisos()) else it }
+        // No teste (em casa, com família e vizinho ouvindo), os bipes ficam baixinhos ([VOLUME_DO_BIPE_DE_TESTE]) e sem
+        // o apito agudo do fim: é só pra quem segura o celular perceber. A 40% (10-17), um teste à noite virou um
+        // vexame. No alarme, vão ao máximo
+        val teste = foto?.alarme?.deTeste == true
+        val degrau = volumeDoBipe(n, maximo, degraus).let { if (teste) minOf(it, VOLUME_DO_BIPE_DE_TESTE) else it }
         if (volumeAntesDoBipe == null) volumeAntesDoBipe = audio.getStreamVolume(AudioManager.STREAM_ALARM)
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, degrau, 0) }
         Log.i(TAG, "Sirene: bipe $n no volume $degrau de $maximo")
         bipador?.release()
-        bipador = tocarArquivo(somDoApp(som), emLoop = false)
+        bipador = tocarArquivo(somDoApp(if (teste) R.raw.bipe else som), emLoop = false)
         val duracao = (bipador?.duration?.coerceAtLeast(0) ?: 0).toLong()
         handler.removeCallbacks(voltarDoBipe)
         handler.postDelayed(voltarDoBipe, duracao + FOLGA_BIPE_MS)
@@ -281,7 +284,7 @@ class Sirene(private val ctx: Context) {
      * Apito alto [n] (1 a 3) da verificação do meio, sem resposta: o som do último bipe da vigia, nos três
      * degraus de cima do [volumeDoBipe], cada vez mais alto.
      */
-    fun apito(n: Int) = bipe(BIPES_ATE_ZERAR - 3 + n, R.raw.bipe_final)
+    fun apito(n: Int) = bipe(BIPES_ATE_ZERAR - 3 + n, som = R.raw.bipe_final)
 
     /** O "plim" de uma frase repetida certa, na verificação do meio. */
     fun acerto(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.acerto), volumeDosAvisos(), aoTerminar)
@@ -421,6 +424,9 @@ class Sirene(private val ctx: Context) {
     }
 
     private companion object {
+        /** O degrau de volume de alarme (de 15 no S24 FE) em que param os bipes de um alarme de teste. */
+        const val VOLUME_DO_BIPE_DE_TESTE = 2
+
         /** Antes de uma fala depois de um silêncio longo, o tempo pra saída do alto-falante acordar ([falarDepoisDeAcordar]). */
         const val ACORDAR_ANTES_MS = 1_500L
 

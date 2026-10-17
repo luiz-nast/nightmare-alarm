@@ -29,8 +29,9 @@ object Ajustes {
 
     /**
      * O alarme que tocou e ainda não foi cumprido. Só [AlarmeService] apaga, quando a missão é
-     * cumprida (e a saída de emergência pelo cabo, [PararPeloCabo], que só o adb chama). Se o processo morrer no meio (celular desligado, app encerrado ou caído), o [App]
-     * vê isto ao voltar e religa o alarme. Gravação ilegível conta como nenhum, pra não derrubar o app.
+     * cumprida (e a saída de emergência pelo cabo, [PararPeloCabo], que só o adb chama). Se o processo morrer no meio
+     * (celular desligado, app encerrado ou caído), o [App] vê isto ao voltar e religa o alarme; um teste, ele só apaga.
+     * Gravação ilegível conta como nenhum, pra não derrubar o app.
      */
     var emAndamento: EmAndamento?
         get() = runCatching { prefs.getString("alarmeEmAndamento", null)?.let { EmAndamento.deJson(JSONObject(it)) } }.getOrNull()

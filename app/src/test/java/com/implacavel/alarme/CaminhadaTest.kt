@@ -111,8 +111,12 @@ class CaminhadaTest {
         // Parado: nunca
         val parado = DetectorDePassos()
         assertNull(parado.andar(20.0, hz = 1.8, forca = 0.02))
-        // Sacudindo rápido (4 por segundo): picos colados demais, não é passo
+        // Sacudindo rápido (4 por segundo): suavizado em 0,2 s, o pico fica fraco demais pra ser passo
         assertNull(DetectorDePassos().andar(20.0, hz = 4.0, forca = 3.0))
+        // Correndo (3 por segundo): é passo, no ritmo de quem corre (dois picos colados contam como um só, não derrubam o ritmo)
+        val correndo = DetectorDePassos()
+        assertTrue(correndo.andar(10.0, hz = 3.0, forca = 4.0) != null)
+        assertEquals(180f, correndo.cadencia!!, 10f)
         // Parou: deixa de andar em 2 s
         passos.andar(3.0, hz = 1.8, forca = 0.0, desdeMs = 10_000)
         assertTrue(!passos.andando)
@@ -180,18 +184,65 @@ class CaminhadaTest {
         q.fazer(30)
         val balancando = q.fazer(180, hz = 2.0, forca = 3.0, vGps = { 1.2f }, rumoGps = { 90f }, erro = { r.nextGaussian() * 1.5 to r.nextGaussian() * 1.5 })
         assertEquals(0L, q.somado)
-        assertEquals("não saiu do lugar", balancando.last().motivo) // e depois de 1 min conferindo, os bipes voltam
-        assertTrue(!balancando.last().valeProBipe)
+        assertEquals("não saiu do lugar", balancando.last().motivo) // depois de 1 min conferindo, a tela fica vermelha
+        assertTrue(balancando.last().valeProBipe) // mas quem balança está acordado: não bipa, só não soma
     }
 
     @Test
     fun andarNoLugarNaoConta() {
         val p = Pessoa()
         p.fazer(30)
-        val noLugar = p.fazer(60, hz = 1.8)
+        val noLugar = p.fazer(90, hz = 1.8)
         assertEquals(0L, p.somado)
-        assertEquals("no lugar", noLugar.last().motivo)
-        assertTrue(noLugar.none { it.valeProBipe })
+        // Passo é sinal de vida: nenhum bipe (depois dos 3 s pra reconhecer o ritmo). Mas sem o GPS ver sair do lugar,
+        // fica conferindo e, depois de 1 min, vermelho
+        assertTrue(noLugar.drop(5).all { it.valeProBipe })
+        assertEquals(Movimento.CONFERINDO, noLugar[30].movimento)
+        assertEquals("no lugar", noLugar[30].motivo)
+        assertEquals(Movimento.PARADO, noLugar.last().movimento)
+        assertEquals("não saiu do lugar", noLugar.last().motivo)
+    }
+
+    @Test
+    fun corredorCobertoDepoisDaRuaContaPelaConfianca() {
+        // 2 min andando na área aberta (o GPS confirma) e, de lá, um corredor coberto: os passos seguem, o GPS perde a
+        // velocidade (como no corredor da piscina, 10-17). Soma direto pelos passos, com a confiança que juntou, sem bipe
+        val p = Pessoa()
+        p.fazer(30)
+        p.fazer(120, hz = 1.8, v = 1.2)
+        val coberto = p.fazer(60, hz = 1.8, vGps = { 0.2f })
+        assertTrue("coberto somou ${coberto.sumOf { it.soma }} ms", coberto.sumOf { it.soma } >= 55_000)
+        assertTrue(coberto.all { it.valeProBipe })
+        assertTrue(coberto.drop(15).all { it.movimento == Movimento.ANDANDO && it.motivo == "pelos passos" })
+        // A confiança (até 90 s) acaba: fica conferindo e, em 1 min, a tela avisa que o GPS não vê. Ainda sem bipe
+        val longo = p.fazer(120, hz = 1.8, vGps = { 0.2f })
+        assertTrue("longo somou ${longo.sumOf { it.soma }} ms", longo.sumOf { it.soma } in 20_000..45_000)
+        assertTrue(longo.all { it.valeProBipe })
+        assertEquals("não saiu do lugar", longo.last().motivo)
+        // Quem nunca andou na área aberta não tem confiança: os passos na cama (ou em casa) não somam nada
+        val cama = Pessoa()
+        cama.fazer(30)
+        cama.fazer(120, hz = 1.8, vGps = { 0.2f })
+        assertEquals(0L, cama.somado)
+    }
+
+    @Test
+    fun semPassoReconhecidoOGpsSozinhoConta() {
+        // O celular quieto na mão, o acelerômetro sem ver passo (10-17 à noite: 15 de 30 s), e o GPS vendo 1 m/s com o
+        // ponto andando junto: conta
+        val p = Pessoa()
+        p.fazer(30)
+        val andando = p.fazer(60, v = 1.0)
+        assertTrue("somou ${p.somado} ms", p.somado >= 45_000)
+        assertEquals("pelo GPS", andando.last().motivo)
+        assertTrue(andando.drop(4).all { it.valeProBipe })
+        // Mais rápido que isso sem passo é bicicleta: não soma (mas quem pedala está acordado: não bipa)
+        val bicicleta = Pessoa()
+        bicicleta.fazer(30)
+        val pedalando = bicicleta.fazer(60, v = 3.0)
+        assertEquals(0L, bicicleta.somado)
+        assertEquals("sem passo", pedalando.last().motivo)
+        assertEquals(Movimento.PARADO, pedalando.last().movimento)
     }
 
     @Test
@@ -344,15 +395,17 @@ class CaminhadaTest {
     /**
      * A 1ª gravação de 10-17: GPS ligando com o celular parado (com um salto de 14 m), sentado balançando o celular, 11
      * min andando em volta da piscina e num corredor (às vezes correndo), e parado de novo. Parado e balançando, nada;
-     * andando na área aberta, quase tudo (no corredor coberto o GPS não vê a velocidade: não conta).
+     * andando, quase tudo: na área aberta pelo GPS, e no corredor coberto (o GPS não vê a velocidade) pelos passos, com
+     * a confiança da área aberta (somou 542 s pros 457 fixos da área aberta: o corredor entrou). Parando, os 2 s até os
+     * passos pararem ainda somam.
      */
     @Test
     fun aGravacaoDaPiscina() {
         val g = Gravacao("caminhada_10-17.txt.gz", andandoDe = 100_000, andandoAte = 770_000)
         println("piscina 1: parado ${g.somou(0, 60_000)} ms, balançando ${g.somou(60_001, 87_000)} ms, andando ${g.somou(87_001, 780_000)} ms (${g.fixosAndando} fixos andando na área aberta), depois ${g.somou(780_001)} ms; passos em ${g.passosAndando}")
         assertEquals(0L, g.somou(0, 87_000))
-        assertEquals(0L, g.somou(780_001))
-        assertTrue(g.somou(87_001, 780_000) >= 800L * g.fixosAndando)
+        assertTrue(g.somou(780_001) <= 5_000)
+        assertTrue(g.somou(87_001, 780_000) >= 1_000L * g.fixosAndando)
         assertTrue(g.passosAndando >= 0.9 * g.fixosAndando)
     }
 
@@ -394,11 +447,11 @@ class CaminhadaTest {
     }
 
     @Test
-    fun caminhada16MinutosEPrazo4ETeste8Minutos() {
+    fun caminhada16MinutosEPrazo4ETeste3Minutos() {
         val alarme = Alarme(1, 7, 0, caminhada = true)
         val teste = Alarme.teste(caminhada = true)
         assertEquals(16 * 60_000L, metaCaminhada(alarme))
-        assertEquals(8 * 60_000L, metaCaminhada(teste))
+        assertEquals(3 * 60_000L, metaCaminhada(teste))
         assertEquals(4 * 60_000L, prazoSair(alarme))
         assertEquals(30_000L, prazoSair(teste))
     }
@@ -411,14 +464,35 @@ class CaminhadaTest {
         assertEquals("You have 3:32 to start walking", avisoDoPrazo(agora = 28_000, prazoAte = prazo))
         assertEquals("You have 20 s to start walking", avisoDoPrazo(agora = 220_000, prazoAte = prazo))
         assertNull(avisoDoPrazo(agora = prazo, prazoAte = prazo))
-        // Parado desde antes do fim do prazo: o 1º bipe 10 s depois dele
-        assertEquals(prazo + 10_000, primeiroBipeParado(ultimoPasso = 100_000, prazoAte = prazo))
-        assertEquals(10, segundosProBipe(agora = prazo, ultimoPasso = 100_000, prazoAte = prazo))
-        assertEquals(1, segundosProBipe(agora = prazo + 9_500, ultimoPasso = 100_000, prazoAte = prazo))
+        // Parado desde antes do fim do prazo: o 1º bipe 23 s depois dele
+        assertEquals(prazo + 23_000, primeiroBipeParado(ultimoPasso = 100_000, prazoAte = prazo))
+        assertEquals(23, segundosProBipe(agora = prazo, ultimoPasso = 100_000, prazoAte = prazo))
+        assertEquals(1, segundosProBipe(agora = prazo + 22_500, ultimoPasso = 100_000, prazoAte = prazo))
         assertEquals(0, segundosProBipe(agora = prazo + 30_000, ultimoPasso = 100_000, prazoAte = prazo)) // já bipando
-        // Parou de andar depois do prazo: 10 s depois do último passo
-        assertEquals(prazo + 15_000, primeiroBipeParado(ultimoPasso = prazo + 5_000, prazoAte = prazo))
-        assertEquals(7, segundosProBipe(agora = prazo + 8_000, ultimoPasso = prazo + 5_000, prazoAte = prazo))
+        // Parou de andar depois do prazo: 23 s depois do último sinal de vida
+        assertEquals(prazo + 28_000, primeiroBipeParado(ultimoPasso = prazo + 5_000, prazoAte = prazo))
+        assertEquals(20, segundosProBipe(agora = prazo + 8_000, ultimoPasso = prazo + 5_000, prazoAte = prazo))
+        assertNull(paradoHa(agora = prazo - 1, ultimoPasso = 0, prazoAte = prazo))
+        assertEquals(3_000L, paradoHa(agora = prazo + 8_000, ultimoPasso = prazo + 5_000, prazoAte = prazo))
+        assertEquals(8_000L, paradoHa(agora = prazo + 8_000, ultimoPasso = 100_000, prazoAte = prazo))
+    }
+
+    @Test
+    fun barraDoBipe() {
+        // 20 s em paz, bipe fraco aos 23 s, um degrau a cada 3 s, o máximo (7º bipe, som forte) aos 41 s
+        assertEquals(41_000L, PARADO_MAXIMO_MS)
+        assertEquals(0, bipeDoParado(22_999))
+        assertEquals(1, bipeDoParado(23_000))
+        assertEquals(1, bipeDoParado(25_999))
+        assertEquals(2, bipeDoParado(26_000))
+        assertEquals(7, bipeDoParado(41_000))
+        assertEquals(listOf(2, 4, 6, 9, 11, 13, 15), (1..BIPES_PARADO_ATE_O_MAXIMO).map { volumeDoBipe(it, 15, BIPES_PARADO_ATE_O_MAXIMO) })
+        assertEquals("Stopped 12 s · beeps start in 11 s", textoDoParado(12_000))
+        assertEquals("Stopped 0 s · beeps start in 23 s", textoDoParado(0))
+        assertEquals("Beep 1 of 7 · maximum in 18 s", textoDoParado(23_000))
+        assertEquals("Beep 3 of 7 · maximum in 12 s", textoDoParado(29_000))
+        assertEquals("🔊 Maximum · walk and it stops", textoDoParado(41_000))
+        assertEquals("🔊 Maximum · walk and it stops", textoDoParado(90_000))
     }
 
     @Test
