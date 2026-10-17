@@ -16,6 +16,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -175,23 +176,35 @@ fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit) {
     }
 }
 
-/** Música que toca em todos os alarmes; sem escolha, vale o toque de alarme do celular. */
+/**
+ * A biblioteca de sons ([Sons]): cada som com a bolinha do padrão (o que toca nos alarmes sem som próprio) e "Remove";
+ * "Phone alarm ringtone" é o padrão sem som nenhum. "Add sound" copia um arquivo do celular pra dentro do app.
+ */
 @Composable
-fun CartaoMusica(nome: String?, onEscolher: () -> Unit, onTirar: () -> Unit) {
+fun CartaoSons(sons: List<Sons.Som>, padrao: String?, onAdicionar: () -> Unit, onPadrao: (String?) -> Unit, onRemover: (String) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Alarm music", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    nome ?: "Phone alarm ringtone",
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Sounds", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Button(onClick = onAdicionar) { Text("Add sound") }
             }
-            if (nome != null) TextButton(onClick = onTirar) { Text("Remove") }
-            Button(onClick = onEscolher) { Text("Choose") }
+            Text(
+                "Each alarm picks its sound in the editor; the marked one plays when an alarm has none. Sounds are copied into the app: they keep playing even if the original file is gone.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+            )
+            LinhaDoSom("Phone alarm ringtone", padrao == null, { onPadrao(null) }, onRemover = null)
+            sons.forEach { som -> LinhaDoSom(som.nome, padrao == som.nome, { onPadrao(som.nome) }) { onRemover(som.nome) } }
         }
+    }
+}
+
+@Composable
+private fun LinhaDoSom(nome: String, padrao: Boolean, onPadrao: () -> Unit, onRemover: (() -> Unit)?) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onPadrao), verticalAlignment = Alignment.CenterVertically) {
+        RadioButton(selected = padrao, onClick = onPadrao)
+        Text(nome, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (onRemover != null) TextButton(onClick = onRemover) { Text("Remove") }
     }
 }
 
@@ -203,8 +216,10 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
             Column(Modifier.weight(1f)) {
                 Text(alarme.horario, fontSize = 44.sp, fontWeight = FontWeight.Bold, color = corHorario)
                 Text(
-                    listOfNotNull(alarme.rotulo.ifBlank { null }, resumoDias(alarme.dias)).joinToString(" · "),
+                    listOfNotNull(alarme.rotulo.ifBlank { null }, resumoDias(alarme.dias), alarme.som?.let { "♪ $it" }).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     when {

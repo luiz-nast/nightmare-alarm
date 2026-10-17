@@ -140,8 +140,18 @@ private fun TelaAlarme(alarme: Alarme) {
     BrilhoMaximo()
     val claro = alarme.missao && silenciado
     BarrasDoSistema(iconesEscuros = claro)
-    val corTexto = if (claro) VinhoAlarme else Color.White
-    val fundo = if (claro) listOf(Color(0xFFFFFBF2), Color(0xFFFFE0B2)) else listOf(VermelhoAlarme, VinhoAlarme, Color.Black)
+    // A etapa da caminhada (com as ondas do prazo pra sair) em azul; o resto do dia claro em creme; a música, vermelho
+    val naCaminhada = claro && caminhada != null
+    val corTexto = when {
+        naCaminhada -> AzulCaminhada
+        claro -> VinhoAlarme
+        else -> Color.White
+    }
+    val fundo = when {
+        naCaminhada -> FundoCaminhada
+        claro -> listOf(Color(0xFFFFFBF2), Color(0xFFFFE0B2))
+        else -> listOf(VermelhoAlarme, VinhoAlarme, Color.Black)
+    }
 
     // Lido só ao desenhar o ícone: o pulso não recompõe a tela inteira a cada quadro. Na etapa da
     // câmera (até 40 min) o ícone fica parado: animação sem fim redesenha a tela a cada quadro e esquenta

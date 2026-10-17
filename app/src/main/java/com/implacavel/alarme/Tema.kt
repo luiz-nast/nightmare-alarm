@@ -19,6 +19,10 @@ import java.time.ZonedDateTime
 val VermelhoAlarme = Color(0xFFB71C1C)
 val VinhoAlarme = Color(0xFF3B0000)
 
+/** A etapa da caminhada (as ondas do prazo pra sair e a rua) é azul, não vermelha: pedido do dono (10-17). */
+val AzulCaminhada = Color(0xFF0D47A1)
+val FundoCaminhada = listOf(Color(0xFFF3F9FF), Color(0xFFBBDEFB))
+
 private val Claro = lightColorScheme(
     primary = Color(0xFFB3261E),
     onPrimary = Color.White,

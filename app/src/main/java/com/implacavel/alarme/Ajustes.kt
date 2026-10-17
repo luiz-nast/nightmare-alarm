@@ -1,12 +1,8 @@
 package com.implacavel.alarme
 
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,16 +12,12 @@ import org.json.JSONObject
 const val VOLUME_DA_VOZ_MIN = 0.10f
 
 /**
- * Ajustes e estado que precisam sobreviver ao processo: a música do alarme (um arquivo de áudio
- * escolhido pelo usuário no celular; o app não traz música), o volume da voz e o alarme em andamento (e onde a missão dele está).
- * Gravado em [prefsProtegidas], como os alarmes.
+ * Ajustes e estado que precisam sobreviver ao processo: o volume da voz e o alarme em andamento (e onde a missão dele
+ * está). Gravado em [prefsProtegidas], como os alarmes. Os sons ficam em [Sons] (a música única de antes, "musicaUri",
+ * é migrada pra lá).
  */
 object Ajustes {
-    data class Musica(val uri: String, val nome: String)
-
     private lateinit var prefs: SharedPreferences
-    private val _musica = MutableStateFlow<Musica?>(null)
-    val musica: StateFlow<Musica?> = _musica.asStateFlow()
 
     /**
      * O alarme que tocou e ainda não foi cumprido. Só [AlarmeService] apaga, quando a missão é
@@ -80,31 +72,6 @@ object Ajustes {
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
         prefs = ctx.prefsProtegidas("ajustes")
-        _musica.value = prefs.getString("musicaUri", null)?.let { Musica(it, prefs.getString("musicaNome", null) ?: "Music") }
         _volumeDaVoz.value = prefs.getFloat("volumeDaVoz", VOLUME_DA_VOZ).coerceIn(VOLUME_DA_VOZ_MIN, 1f)
-    }
-
-    /** Guarda a música e a permissão de lê-la depois, que sobrevive a reinícios do celular. */
-    fun escolherMusica(ctx: Context, uri: Uri) {
-        ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        val nome = ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-            if (it.moveToFirst()) it.getString(0) else null
-        } ?: "Music"
-        prefs.edit(commit = true) {
-            putString("musicaUri", uri.toString())
-            putString("musicaNome", nome)
-        }
-        _musica.value = Musica(uri.toString(), nome)
-    }
-
-    fun tirarMusica(ctx: Context) {
-        _musica.value?.let {
-            runCatching { ctx.contentResolver.releasePersistableUriPermission(it.uri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        }
-        prefs.edit(commit = true) {
-            remove("musicaUri")
-            remove("musicaNome")
-        }
-        _musica.value = null
     }
 }

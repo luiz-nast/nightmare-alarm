@@ -1,5 +1,8 @@
 package com.implacavel.alarme
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,10 +37,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /** Diálogo pra criar ou editar um alarme. Não grava nada: devolve o alarme pronto em [onSalvar]. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,11 +55,21 @@ fun EditorAlarme(
     onExcluir: () -> Unit,
     onCancelar: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     val relogio = rememberTimePickerState(initialHour = inicial.hora, initialMinute = inicial.minuto, is24Hour = true)
     var rotulo by remember { mutableStateOf(inicial.rotulo) }
     var dias by remember { mutableStateOf(inicial.dias) }
     // Um tipo só: "câmera + frases", "conversa + caminhada" (os dois com missão) ou lembrete de remédio
     var tipo by remember { mutableStateOf(tipoDe(inicial)) }
+    // O som deste alarme, da biblioteca (null = o padrão); "Add new sound…" copia um arquivo pra biblioteca e já o escolhe
+    var som by remember { mutableStateOf(inicial.som) }
+    val sons by Sons.lista.collectAsStateWithLifecycle()
+    val padrao by Sons.padrao.collectAsStateWithLifecycle()
+    val adicionarSom = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val novoSom = Sons.adicionar(ctx, uri)
+        if (novoSom == null) Toast.makeText(ctx, "Could not read that file.", Toast.LENGTH_LONG).show() else som = novoSom.nome
+    }
 
     Dialog(onDismissRequest = onCancelar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -102,6 +118,14 @@ fun EditorAlarme(
                     "A gentle tone, from 15% to 75% volume in 2 min, and a TURN OFF button",
                     tipo == TipoDeAlarme.REMEDIO,
                 ) { tipo = TipoDeAlarme.REMEDIO }
+                // O remédio toca o toque suave do app: sem escolha de som
+                if (tipo != TipoDeAlarme.REMEDIO) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Sound", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
+                    OpcaoSom("Default: ${padrao ?: "phone alarm ringtone"}", som == null) { som = null }
+                    sons.forEach { s -> OpcaoSom(s.nome, som == s.nome) { som = s.nome } }
+                    TextButton(onClick = { adicionarSom.launch(arrayOf("audio/*")) }, modifier = Modifier.fillMaxWidth()) { Text("Add new sound…") }
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (!novo) {
@@ -122,6 +146,7 @@ fun EditorAlarme(
                                 missao = tipo != TipoDeAlarme.REMEDIO,
                                 remedio = tipo == TipoDeAlarme.REMEDIO,
                                 caminhada = tipo == TipoDeAlarme.CONVERSA_E_CAMINHADA,
+                                som = if (tipo == TipoDeAlarme.REMEDIO) null else som,
                                 ativo = true,
                             )
                             onSalvar(alarme)
@@ -163,6 +188,18 @@ private fun SeletorDias(dias: Set<Int>, onMudar: (Set<Int>) -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** Uma linha da escolha do som: bolinha e nome. */
+@Composable
+private fun OpcaoSom(nome: String, escolhido: Boolean, onEscolher: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onEscolher).padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = escolhido, onClick = onEscolher)
+        Text(nome, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 

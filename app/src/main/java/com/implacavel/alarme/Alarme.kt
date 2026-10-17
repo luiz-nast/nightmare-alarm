@@ -39,6 +39,8 @@ const val VOLUME_DA_VOZ = 0.30f
  * @property caminhada despertador "conversa + caminhada": depois do STOP, 10 min de conversa com a IA do
  *   celular, 4 min pra sair e 16 min andando na rua, chova ou faça sol (sem a IA, direto pra caminhada). Sem ele, o
  *   despertador é o "câmera + frases". Só vale com [missao].
+ * @property som o som deste alarme: o nome de um arquivo da biblioteca ([Sons]); null = o padrão da biblioteca (ou,
+ *   sem padrão, o toque de alarme do celular). O remédio não usa: toca o toque suave do app.
  */
 data class Alarme(
     val id: Int,
@@ -50,6 +52,7 @@ data class Alarme(
     val missao: Boolean = true,
     val remedio: Boolean = false,
     val caminhada: Boolean = false,
+    val som: String? = null,
 ) {
     val horario: String get() = hhmm(hora, minuto)
 
@@ -85,6 +88,7 @@ data class Alarme(
         .put("missao", missao)
         .put("remedio", remedio)
         .put("caminhada", caminhada)
+        .apply { if (som != null) put("som", som) }
 
     companion object {
         /** Id reservado pro botão "Testar câmera + frases". Os alarmes salvos começam em 1. */
@@ -113,6 +117,7 @@ data class Alarme(
                 missao = o.optBoolean("missao", true),
                 remedio = o.optBoolean("remedio", false),
                 caminhada = o.optBoolean("caminhada", false),
+                som = o.optString("som").ifEmpty { null },
                 // "volumeForte" (e "volumeMaximo"), das versões anteriores, não existe mais: ignorado
             )
         }
@@ -121,27 +126,28 @@ data class Alarme(
 
 /**
  * O alarme que tocou e ainda não foi cumprido, com tudo pra ele voltar igual se o app morrer: o
- * [alarme] como estava, quando tocou ([desde], epoch em ms), a [musica] (URI) e o [volume] de
- * alarme de antes (a Sirene o devolve no fim; veja [volumeAgora]).
- * Editar o alarme, trocar a música ou abaixar o volume depois não muda nada.
+ * [alarme] como estava, quando tocou ([desde], epoch em ms), a [musica] (URI: o som da biblioteca que o alarme
+ * toca, [Sons.uriDoAlarme]; null = o toque do celular) e o [volume] de alarme de antes (a Sirene o devolve no fim;
+ * veja [volumeAgora]). Editar o alarme, trocar o som ou abaixar o volume depois não muda nada.
  */
 data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?, val volume: Int) {
     /**
-     * Outro alarme disparou no meio, [agora] (epoch em ms). Teste no meio de um alarme não muda nada.
-     * Alarme de verdade no meio do teste toma o lugar dele, com as regras dele (a câmera do teste pede
-     * bem menos, veja [metaOlhar]), tocando desde agora e com o volume de antes do teste. Dois alarmes
-     * de verdade viram um: este continua, com a exigência maior dos dois (e com a música, se um deles tiver;
-     * e com a conversa + caminhada, se um deles tiver).
+     * Outro alarme disparou no meio, [agora] (epoch em ms), com a música dele ([musicaDoOutro]). Teste no meio de um
+     * alarme não muda nada. Alarme de verdade no meio do teste toma o lugar dele, com as regras e a música dele (a
+     * câmera do teste pede bem menos, veja [metaOlhar]), tocando desde agora e com o volume de antes do teste. Dois
+     * alarmes de verdade viram um: este continua, com a exigência maior dos dois (com a música deste, ou a do outro
+     * se este não tiver; e com a conversa + caminhada, se um deles tiver).
      */
-    fun juntar(outro: Alarme, agora: Long): EmAndamento = when {
+    fun juntar(outro: Alarme, agora: Long, musicaDoOutro: String? = musica): EmAndamento = when {
         outro.deTeste -> this
-        alarme.deTeste -> copy(alarme = outro, desde = agora)
+        alarme.deTeste -> copy(alarme = outro, desde = agora, musica = musicaDoOutro)
         else -> copy(
             alarme = alarme.copy(
                 missao = alarme.missao || outro.missao,
                 remedio = alarme.remedio && outro.remedio,
                 caminhada = alarme.caminhada || outro.caminhada,
             ),
+            musica = musica ?: musicaDoOutro,
         )
     }
 

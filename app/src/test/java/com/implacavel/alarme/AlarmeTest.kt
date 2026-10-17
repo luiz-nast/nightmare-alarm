@@ -3,6 +3,7 @@ package com.implacavel.alarme
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneId
@@ -58,6 +59,24 @@ class AlarmeTest {
         assertEquals(caminhada, Alarme.deJson(caminhada.paraJson()))
         assertTrue(caminhada.paraJson().getBoolean("caminhada"))
         assertEquals(Alarme.teste(caminhada = true), Alarme.deJson(Alarme.teste(caminhada = true).paraJson()))
+        // O som da biblioteca, por alarme; sem ele, nada no JSON (e o JSON antigo, sem "som", lê como nenhum)
+        val comSom = Alarme(5, 7, 0, som = "Raya.mp3")
+        assertEquals(comSom, Alarme.deJson(comSom.paraJson()))
+        assertFalse(caminhada.paraJson().has("som"))
+        assertNull(Alarme.deJson(caminhada.paraJson()).som)
+    }
+
+    @Test
+    fun nomesDaBibliotecaDeSons() {
+        assertEquals("Raya.mp3", nomeSeguro("Raya.mp3"))
+        assertEquals("a_b_c.mp3", nomeSeguro("a/b\\c.mp3"))
+        assertEquals("Sound", nomeSeguro(null))
+        assertEquals("Sound", nomeSeguro("  "))
+        assertEquals("Sound", nomeSeguro(".."))
+        assertEquals("Raya.mp3", nomeLivre("Raya.mp3", listOf("SEM CONTROLE.mp3")))
+        assertEquals("Raya (2).mp3", nomeLivre("Raya.mp3", listOf("Raya.mp3")))
+        assertEquals("Raya (3).mp3", nomeLivre("Raya.mp3", listOf("Raya.mp3", "Raya (2).mp3")))
+        assertEquals("semextensao (2)", nomeLivre("semextensao", listOf("semextensao")))
     }
 
     @Test
@@ -109,6 +128,10 @@ class AlarmeTest {
         assertEquals(5, junto.volume)
         // Juntar com um alarme mais fraco não afrouxa nada
         assertEquals(junto, junto.juntar(Alarme(3, 7, 5, missao = false), agora = 600_000))
+        // Sem música, pega a do outro; com a sua, fica com ela
+        assertEquals("file:///sons/a.mp3", junto.juntar(Alarme(4, 7, 5), agora = 600_000, musicaDoOutro = "file:///sons/a.mp3").musica)
+        val comMusica = junto.copy(musica = "file:///sons/b.mp3")
+        assertEquals("file:///sons/b.mp3", comMusica.juntar(Alarme(4, 7, 5), agora = 600_000, musicaDoOutro = "file:///sons/a.mp3").musica)
     }
 
     @Test

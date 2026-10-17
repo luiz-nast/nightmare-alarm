@@ -56,8 +56,10 @@ private fun TelaPrincipal() {
     val ctx = LocalContext.current
     val alarmes by Alarmes.lista.collectAsStateWithLifecycle()
     val tocando by AlarmeService.tocando.collectAsStateWithLifecycle()
-    val musica by Ajustes.musica.collectAsStateWithLifecycle()
+    val sons by Sons.lista.collectAsStateWithLifecycle()
+    val somPadrao by Sons.padrao.collectAsStateWithLifecycle()
     val volumeDaVoz by Ajustes.volumeDaVozAgora.collectAsStateWithLifecycle()
+    lidoAoVoltar { Sons.reler() } // um som pode ter chegado pelo cabo
     val agora = agoraACada(15_000) // pros textos "rings in 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
 
@@ -82,8 +84,8 @@ private fun TelaPrincipal() {
         }
     }
 
-    val escolherMusica = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) Ajustes.escolherMusica(ctx, uri)
+    val adicionarSom = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && Sons.adicionar(ctx, uri) == null) Toast.makeText(ctx, "Could not read that file.", Toast.LENGTH_LONG).show()
     }
 
     Scaffold(
@@ -116,10 +118,12 @@ private fun TelaPrincipal() {
             }
             item { CartaoPoderes(poderes, liberar) }
             item {
-                CartaoMusica(
-                    nome = musica?.nome,
-                    onEscolher = { escolherMusica.launch(arrayOf("audio/*")) },
-                    onTirar = { Ajustes.tirarMusica(ctx) },
+                CartaoSons(
+                    sons = sons,
+                    padrao = somPadrao,
+                    onAdicionar = { adicionarSom.launch(arrayOf("audio/*")) },
+                    onPadrao = Sons::escolherPadrao,
+                    onRemover = Sons::remover,
                 )
             }
             item {

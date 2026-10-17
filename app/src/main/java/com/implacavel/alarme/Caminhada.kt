@@ -332,15 +332,15 @@ fun EtapaCaminhada(
                 cor, Modifier.fillMaxSize(),
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(tempoAndado(andadoMs), color = VinhoAlarme, fontSize = 56.sp, fontWeight = FontWeight.Black)
-                Text("of ${tempoAndado(metaMs)} walking", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 18.sp)
+                Text(tempoAndado(andadoMs), color = AzulCaminhada, fontSize = 56.sp, fontWeight = FontWeight.Black)
+                Text("of ${tempoAndado(metaMs)} walking", color = AzulCaminhada.copy(alpha = 0.7f), fontSize = 18.sp)
             }
         }
         Spacer(Modifier.height(16.dp))
         Text(status, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         // Sempre presente, pra tela não pular: o prazo pra sair ou, depois dele, a barra do bipe
         if (noPrazo != null) {
-            Text(noPrazo, color = VinhoAlarme, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Text(noPrazo, color = AzulCaminhada, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         } else {
             BarraDoBipe(paradoMs)
         }
@@ -353,9 +353,9 @@ fun EtapaCaminhada(
         }
         Spacer(Modifier.height(12.dp))
         Trilha(sentidos.trilha, Modifier.size(TRILHA_TAMANHO))
-        Text("Your trail: green where it counted", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 14.sp)
+        Text("Your trail: green where it counted", color = AzulCaminhada.copy(alpha = 0.7f), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
-        Text("Only walking counts, outdoors, on foot", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+        Text("Only walking counts, outdoors, on foot", color = AzulCaminhada.copy(alpha = 0.7f), fontSize = 15.sp)
     }
 }
 
@@ -373,8 +373,8 @@ private fun BarraDoBipe(paradoMs: Long) {
     val bipe = bipeDoParado(paradoMs)
     val cor = when {
         paradoMs == 0L -> VerdeAndando
-        bipe == 0 -> VinhoAlarme
-        bipe < BIPES_PARADO_ATE_O_MAXIMO -> lerp(VinhoAlarme, VermelhoParado, bipe.toFloat() / BIPES_PARADO_ATE_O_MAXIMO)
+        bipe == 0 -> AzulCaminhada
+        bipe < BIPES_PARADO_ATE_O_MAXIMO -> lerp(AzulCaminhada, VermelhoParado, bipe.toFloat() / BIPES_PARADO_ATE_O_MAXIMO)
         else -> VermelhoParado
     }
     Column(Modifier.fillMaxWidth(0.85f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -387,7 +387,7 @@ private fun BarraDoBipe(paradoMs: Long) {
             val trilho = 10.dp.toPx()
             val baseY = size.height - trilho / 2
             val largura = size.width
-            drawLine(VinhoAlarme.copy(alpha = 0.2f), Offset(0f, baseY), Offset(largura, baseY), trilho, StrokeCap.Round)
+            drawLine(AzulCaminhada.copy(alpha = 0.2f), Offset(0f, baseY), Offset(largura, baseY), trilho, StrokeCap.Round)
             if (fracao > 0f) {
                 drawLine(cor, Offset(0f, baseY), Offset(largura * fracao, baseY), trilho, StrokeCap.Round)
             }
@@ -397,14 +397,14 @@ private fun BarraDoBipe(paradoMs: Long) {
                 val altura = 6.dp.toPx() + (size.height - trilho - 6.dp.toPx()) * n / BIPES_PARADO_ATE_O_MAXIMO
                 val aceso = bipe >= n
                 drawLine(
-                    if (aceso) VermelhoParado else VinhoAlarme.copy(alpha = 0.45f), Offset(x, baseY - trilho / 2 - 2.dp.toPx()),
+                    if (aceso) VermelhoParado else AzulCaminhada.copy(alpha = 0.45f), Offset(x, baseY - trilho / 2 - 2.dp.toPx()),
                     Offset(x, baseY - trilho / 2 - 2.dp.toPx() - altura), if (aceso) 4.dp.toPx() else 2.dp.toPx(), StrokeCap.Round,
                 )
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("quiet", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 12.sp)
-            Text("beeps from ${PARADO_MS / 1000} s", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("quiet", color = AzulCaminhada.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("beeps from ${PARADO_MS / 1000} s", color = AzulCaminhada.copy(alpha = 0.7f), fontSize = 12.sp)
             Text("max at ${PARADO_MAXIMO_MS / 1000} s", color = VermelhoParado.copy(alpha = 0.8f), fontSize = 12.sp)
         }
     }
@@ -439,7 +439,7 @@ private fun Trilha(pontos: List<PontoDaTrilha>, modifier: Modifier) {
             }
             drawLine(cor, ponto(pontos[i - 1]), ponto(pontos[i]), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
         }
-        drawCircle(VinhoAlarme, radius = 6.dp.toPx(), center = ponto(pontos.last()))
+        drawCircle(AzulCaminhada, radius = 6.dp.toPx(), center = ponto(pontos.last()))
     }
 }
 

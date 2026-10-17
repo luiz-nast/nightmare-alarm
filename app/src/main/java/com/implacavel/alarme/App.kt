@@ -26,6 +26,7 @@ class App : Application() {
         super.onCreate()
         Alarmes.carregar(this)
         Ajustes.carregar(this)
+        Sons.carregar(this)
         Notificacoes.criarCanal(this)
         // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta em instantes, e
         // a missão continua de onde estava ([Ajustes.progresso]). Um teste não volta: o dono desligou o celular pra

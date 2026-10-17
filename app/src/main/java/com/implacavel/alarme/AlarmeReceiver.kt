@@ -37,8 +37,8 @@ class AlarmeReceiver : BroadcastReceiver() {
         // No meio da comemoração de outro alarme o volume está nos 40% dela: o de antes é o guardado
         val volume = Ajustes.volumeParaDevolver ?: ctx.getSystemService(AudioManager::class.java).getStreamVolume(AudioManager.STREAM_ALARM)
         val agora = System.currentTimeMillis()
-        Ajustes.emAndamento = Ajustes.emAndamento?.juntar(alarme, agora)
-            ?: EmAndamento(alarme, agora, Ajustes.musica.value?.uri, volume)
+        val musica = Sons.uriDoAlarme(alarme)
+        Ajustes.emAndamento = Ajustes.emAndamento?.juntar(alarme, agora, musica) ?: EmAndamento(alarme, agora, musica, volume)
         Agendador.agendarRetomada(ctx)
         AlarmeService.tocar(ctx)
     }
