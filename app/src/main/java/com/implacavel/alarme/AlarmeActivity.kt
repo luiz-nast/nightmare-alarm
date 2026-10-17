@@ -133,6 +133,8 @@ private fun TelaAlarme(alarme: Alarme) {
     val comCaminhada by AlarmeService.comCaminhada.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
+    // O GPS e o acelerômetro da caminhada ligam no STOP: durante a conversa o GPS já acerta a mira
+    val sentidos = rememberSentidosDaCaminhada(ligado = comCaminhada && silenciado)
 
     // A tela do alarme fica no brilho máximo do começo ao fim; na etapa da câmera, também clara, pra iluminar o rosto no escuro
     BrilhoMaximo()
@@ -181,6 +183,7 @@ private fun TelaAlarme(alarme: Alarme) {
                     // Lido aqui dentro: só a etapa usa. O tempo andado em c vem atualizado do serviço (tela recriada no meio)
                     val ultimoPasso by AlarmeService.ultimoPasso.collectAsStateWithLifecycle()
                     EtapaCaminhada(
+                        sentidos = sentidos,
                         andadoInicialMs = c.andadoMs,
                         metaMs = c.metaMs,
                         prazoAte = c.prazoAte,

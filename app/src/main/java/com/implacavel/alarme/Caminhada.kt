@@ -1,17 +1,23 @@
 // Tela da caminhada da manhã (despertador "conversa + caminhada"), mostrada pela AlarmeActivity depois da
-// conversa: o prazo pra sair de casa e a caminhada contada pelo GPS, num anel. Sem plano B: dentro de casa, sem
-// sinal, com a localização desligada ou sem a permissão dela, o tempo não anda e os bipes não param. As regras e os
-// tempos ficam em RegrasCaminhada.kt; a vigia (bipes de parado), no AlarmeService.
+// conversa: o prazo pra sair de casa e a caminhada contada pelo GPS e pelos passos, num anel. Sem plano B: dentro de
+// casa, sem sinal, com a localização desligada ou sem a permissão dela, o tempo não anda e os bipes não param. As
+// regras e os tempos ficam em RegrasCaminhada.kt; a vigia (bipes de parado), no AlarmeService.
 package com.implacavel.alarme
 
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
@@ -54,7 +60,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /** O GPS manda um fixo por segundo, mesmo parado: o mais rápido que o GPS do celular dá. */
 private const val INTERVALO_GPS_MS = 1_000L
@@ -68,41 +76,181 @@ private const val AVISO_ANDANDO_MS = 1_000L
 /** Sem fixo novo por esse tempo (o GPS manda um por segundo), o último deixa de valer: "sem sinal", e parado. */
 private const val FIXO_VELHO_MS = 4_000L
 
+/** De quanto em quanto tempo os sentidos releem a permissão da localização (liberada ou tirada no meio). */
+private const val RELER_PERMISSAO_MS = 1_000L
+
 private val ANEL = 220.dp
 
 private val VerdeAndando = Color(0xFF2E7D32)
+private val VerdeConferindo = Color(0xFF7CB342)
 private val VermelhoParado = Color(0xFFC62828)
-
-/** O último fixo do GPS como a tela mostra: o [movimento], a [velocidade] (m/s), a [precisao] (m) e [quando] chegou (SystemClock.elapsedRealtime). */
-private data class LeituraGps(val movimento: Movimento, val velocidade: Float?, val precisao: Float?, val quando: Long, val motivo: String = "")
-
-/** Um ponto da trilha na tela: o fixo válido e se ele contou como andando (verde) ou não (cinza). */
-private data class PontoDaTrilha(val fixo: Fixo, val andando: Boolean)
-
-/** Os pontos da trilha que a tela guarda: os últimos 10 min (um fixo por segundo). */
-private const val TRILHA_MAX = 600
-
-/** A trilha mostra no mínimo um quadrado deste lado, em metros: parado, os pontos ficam embolados no meio. */
-private const val TRILHA_LADO_MIN_M = 40.0
-
 private val CinzaParado = Color(0xFF9E9E9E)
 
+/** A última avaliação do GPS ([avaliacao]), com a [precisao] do fixo (m) e [quando] chegou (SystemClock.elapsedRealtime). */
+data class LeituraGps(val avaliacao: Avaliacao, val precisao: Float?, val quando: Long)
+
+/** Como um trecho da trilha contou: somou, ainda conferindo (vira um dos outros), ou não contou. */
+enum class Trecho { CONTOU, CONFERINDO, NAO }
+
+/** Um ponto da trilha na tela: onde (o caminho filtrado, em metros) e como o trecho até ele contou. */
+data class PontoDaTrilha(val leste: Double, val norte: Double, val trecho: Trecho)
+
+/** Os pontos da trilha que a tela guarda: os últimos 20 min (um fixo por segundo). */
+private const val TRILHA_MAX = 1_200
+
+/** A trilha mostra no mínimo um quadrado deste lado, em metros: parado, o ponto fica no meio. */
+private const val TRILHA_LADO_MIN_M = 40.0
+
 /**
- * Etapa da caminhada: um anel que enche com o tempo andando a pé ([passoDeCaminhada], um fixo do GPS
- * por segundo) até somar [metaMs], começando de [andadoInicialMs] (o que o serviço já guardou: a tela
- * voltou depois de sair, ou foi recriada no meio). Até [prazoAte] (SystemClock.elapsedRealtime) é o
- * prazo pra sair de casa: andar nele já conta, e a tela mostra quanto falta. [onAndando] recebe o tempo
- * já somado a cada [AVISO_ANDANDO_MS] andando e no instante em que para; depois do prazo, parado, a
- * tela mostra a contagem pro bipe a partir do último sinal recebido pelo serviço ([ultimoPasso],
+ * O GPS (um fixo por segundo), o acelerômetro e os satélites da caminhada, com o [detector] que lê os três. Ligados
+ * desde o STOP de uma manhã com caminhada ([rememberSentidosDaCaminhada]): o GPS acerta a mira durante a conversa e,
+ * na hora de sair, já está pronto (a ideia do dono; ligado só na caminhada, o 1º minuto dela era o GPS escorregando
+ * e saltando). Vivem na tela do alarme, não no serviço (a localização "durante o uso" só vale com a tela aberta), e
+ * passam da conversa pra caminhada sem desligar. Só a etapa da caminhada ([aoAvaliar]) soma tempo e desenha a
+ * trilha; antes, o caminho anda (pra saber de onde a pessoa saiu) sem contar. Com [detalhar] (o TesteDoGps), cada
+ * fixo no log ([detalheDoFixo]).
+ */
+class SentidosDaCaminhada(private val detalhar: Boolean) {
+    val detector = DetectorDeCaminhada()
+
+    /** A última avaliação, pra tela; null antes do primeiro fixo. */
+    var leitura by mutableStateOf<LeituraGps?>(null)
+        private set
+
+    val trilha = mutableStateListOf<PontoDaTrilha>()
+
+    /** A permissão da localização, relida a cada [RELER_PERMISSAO_MS]. */
+    var permitida by mutableStateOf(true)
+        internal set
+
+    /** O celular não tem GPS nenhum (defeito: a caminhada não prende ninguém). */
+    var semGps by mutableStateOf(false)
+        internal set
+
+    /** A etapa da caminhada na tela: recebe cada avaliação e soma. Null antes dela (o GPS esquentando). */
+    internal var aoAvaliar: ((Avaliacao) -> Unit)? = null
+
+    /** O sinal médio dos 4 satélites mais fortes da banda L1 (dB-Hz), pro log; null sem satélite. */
+    internal var ceu: Float? = null
+
+    private val resumo = ResumoDoGps()
+
+    internal fun fixo(local: Location) {
+        val atual = fixoDe(local)
+        val chegou = SystemClock.elapsedRealtime()
+        val contando = aoAvaliar != null
+        val avaliacao = detector.fixo(atual, chegou, contando)
+        resumo.somar(atual, avaliacao, chegou, ceu)
+        leitura = LeituraGps(avaliacao, atual.precisaoM, chegou)
+        if (detalhar) Log.i(TAG, detalheDoFixo(detector.trilho.origem ?: atual, atual, local, chegou, avaliacao))
+        if (!contando) return
+        avaliacao.ponto?.let { (leste, norte) ->
+            val trecho = when (avaliacao.movimento) {
+                Movimento.ANDANDO -> Trecho.CONTOU
+                Movimento.CONFERINDO -> Trecho.CONFERINDO
+                else -> Trecho.NAO
+            }
+            // O que estava conferindo vira verde quando soma, e cinza quando a conferência se perde
+            if (trecho == Trecho.CONTOU || avaliacao.conferindo == 0L) repintarConferindo(if (trecho == Trecho.CONTOU) Trecho.CONTOU else Trecho.NAO)
+            trilha += PontoDaTrilha(leste, norte, trecho)
+            if (trilha.size > TRILHA_MAX) trilha.removeAt(0)
+        }
+        aoAvaliar?.invoke(avaliacao)
+    }
+
+    // Toda conferência termina aqui (somou, perdeu ou recomeçou): todo trecho conferindo na trilha é da de agora
+    private fun repintarConferindo(como: Trecho) {
+        for (i in trilha.indices) if (trilha[i].trecho == Trecho.CONFERINDO) trilha[i] = trilha[i].copy(trecho = como)
+    }
+}
+
+/**
+ * Os [SentidosDaCaminhada] da tela, ligados enquanto [ligado] (uma manhã com caminhada, depois do STOP) e com a
+ * permissão da localização. Sem GPS no celular, [SentidosDaCaminhada.semGps].
+ */
+@Composable
+fun rememberSentidosDaCaminhada(ligado: Boolean, detalhar: Boolean = false): SentidosDaCaminhada {
+    val ctx = LocalContext.current
+    val sentidos = remember { SentidosDaCaminhada(detalhar) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            sentidos.permitida = Poder.LOCALIZACAO.liberado(ctx) // liberada nas Configurações, ou tirada no meio
+            delay(RELER_PERMISSAO_MS)
+        }
+    }
+    DisposableEffect(ligado && sentidos.permitida) {
+        if (!ligado || !sentidos.permitida) {
+            if (ligado) Log.w(TAG, "Caminhada: sem permissão de localização, o tempo não anda")
+            return@DisposableEffect onDispose {}
+        }
+        val gps = ctx.getSystemService(LocationManager::class.java)
+        val sensores = ctx.getSystemService(SensorManager::class.java)
+        val principal = Handler(Looper.getMainLooper())
+        val ouvinte = object : LocationListener {
+            override fun onLocationChanged(local: Location) = sentidos.fixo(local)
+
+            // Antes do Android 11 estes três não têm corpo pronto: sem eles, o app cai quando a localização liga ou desliga
+            override fun onProviderEnabled(provider: String) {}
+
+            override fun onProviderDisabled(provider: String) {}
+
+            @Deprecated("Chamado só antes do Android 10")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+        }
+        val satelites = object : GnssStatus.Callback() {
+            override fun onSatelliteStatusChanged(status: GnssStatus) {
+                sentidos.ceu = sinalDaL1(status)
+            }
+        }
+        val acelerometro = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                val (x, y, z) = e.values
+                // O relógio do sensor é o mesmo dos fixos (elapsedRealtimeNanos)
+                sentidos.detector.acelerometro(e.timestamp / 1_000_000, sqrt(x * x + y * y + z * z))
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        try {
+            ouvirGps(gps, ouvinte, satelites, principal)
+            sensores.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sensores.registerListener(acelerometro, it, SensorManager.SENSOR_DELAY_GAME) }
+                ?: Log.w(TAG, "Caminhada: o celular não tem acelerômetro")
+            Log.i(TAG, "Caminhada: GPS e acelerômetro ligados")
+        } catch (e: SecurityException) {
+            // Permissão tirada entre a conferência e o pedido: o laço acima relê e a tela mostra o botão
+            Log.w(TAG, "Caminhada: sem permissão de localização", e)
+            sentidos.permitida = false
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Caminhada: o celular não tem GPS, defeito: o alarme desliga", e)
+            sentidos.semGps = true
+        }
+        onDispose {
+            gps.removeUpdates(ouvinte)
+            gps.unregisterGnssStatusCallback(satelites)
+            sensores.unregisterListener(acelerometro)
+            Log.i(TAG, "Caminhada: GPS e acelerômetro desligados")
+        }
+    }
+    return sentidos
+}
+
+/**
+ * Etapa da caminhada: um anel que enche com o tempo andando a pé (o [SentidosDaCaminhada.detector], um fixo do GPS
+ * por segundo) até somar [metaMs], começando de [andadoInicialMs] (o que o serviço já guardou: a tela voltou depois
+ * de sair, ou foi recriada no meio). Por cima, mais claro, o que ainda está conferindo. Até [prazoAte]
+ * (SystemClock.elapsedRealtime) é o prazo pra sair de casa: andar nele já conta, e a tela mostra quanto falta.
+ * [onAndando] recebe o tempo já somado a cada [AVISO_ANDANDO_MS] andando e no instante em que para; depois do prazo,
+ * parado, a tela mostra a contagem pro bipe a partir do último sinal recebido pelo serviço ([ultimoPasso],
  * [segundosProBipe]); os bipes são da vigia de lá.
  *
  * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada
  * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. [onDefeito] só num
  * celular sem GPS nenhum, pra um defeito não prender ninguém (como a câmera que não abre).
- * [onConcluiu] uma vez, com o anel completo.
+ * [onConcluiu] uma vez, com o anel completo. Com [detalhar] (o TesteDoGps), sem prazo nem bipe.
  */
 @Composable
 fun EtapaCaminhada(
+    sentidos: SentidosDaCaminhada,
     andadoInicialMs: Long,
     metaMs: Long,
     prazoAte: Long,
@@ -110,6 +258,7 @@ fun EtapaCaminhada(
     onAndando: (andadoMs: Long) -> Unit,
     onDefeito: () -> Unit,
     onConcluiu: () -> Unit,
+    detalhar: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
@@ -120,58 +269,19 @@ fun EtapaCaminhada(
     val meta by rememberUpdatedState(metaMs)
     // Continua do que o serviço guardou; parado, o tempo andado fica onde está e nunca desce
     var andadoMs by remember { mutableLongStateOf(andadoInicialMs) }
-    var leitura by remember { mutableStateOf<LeituraGps?>(null) }
-    var janela by remember { mutableStateOf(Janela()) } // os fixos válidos dos últimos 30 s (JANELA_MS): o deslocamento é medido neles
-    val trilha = remember { mutableStateListOf<PontoDaTrilha>() }
+    var conferindoMs by remember { mutableLongStateOf(0L) }
     var ligada by remember { mutableStateOf(gpsLigado(ctx)) }
-    var permitida by remember { mutableStateOf(Poder.LOCALIZACAO.liberado(ctx)) }
     var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
-    // Com a permissão (de novo, se ela foi tirada e liberada no meio), o GPS começa a ouvir
-    DisposableEffect(permitida) {
-        if (!permitida) {
-            Log.w(TAG, "Caminhada: sem permissão de localização, o tempo não anda")
-            return@DisposableEffect onDispose {}
+    DisposableEffect(sentidos) {
+        Log.i(TAG, "Caminhada: começou, ${andadoMs / 1000} s já andados de ${meta / 1000}")
+        sentidos.aoAvaliar = { avaliacao ->
+            andadoMs += avaliacao.soma
+            conferindoMs = avaliacao.conferindo
         }
-        val gps = ctx.getSystemService(LocationManager::class.java)
-        val resumo = ResumoDoGps()
-        val ouvinte = object : LocationListener {
-            override fun onLocationChanged(local: Location) {
-                val atual = fixoDe(local)
-                val chegou = SystemClock.elapsedRealtime()
-                val avaliacao = avaliar(janela, atual)
-                val mov = avaliacao.movimento
-                resumo.somar(atual, avaliacao, chegou)
-                leitura = LeituraGps(mov, velocidade(janela, atual), atual.precisaoM, chegou, avaliacao.motivo)
-                andadoMs += passoDeCaminhada(janela, atual)
-                janela = janelaDepois(janela, atual)
-                if (fixoValido(atual)) {
-                    trilha += PontoDaTrilha(atual, andando = mov == Movimento.ANDANDO)
-                    if (trilha.size > TRILHA_MAX) trilha.removeAt(0)
-                }
-            }
-
-            // Antes do Android 11 estes três não têm corpo pronto: sem eles, o app cai quando a localização liga ou desliga
-            override fun onProviderEnabled(provider: String) {}
-
-            override fun onProviderDisabled(provider: String) {}
-
-            @Deprecated("Chamado só antes do Android 10")
-            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        }
-        try {
-            ouvirGps(gps, ouvinte)
-            Log.i(TAG, "Caminhada: GPS ligado, ${andadoMs / 1000} s já andados de ${meta / 1000}")
-        } catch (e: SecurityException) {
-            // Permissão tirada entre a conferência e o pedido: o laço abaixo relê e mostra o botão
-            Log.w(TAG, "Caminhada: sem permissão de localização", e)
-            permitida = false
-        } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Caminhada: o celular não tem GPS, defeito: o alarme desliga", e)
-            avisarDefeito()
-        }
-        onDispose { gps.removeUpdates(ouvinte) }
+        onDispose { sentidos.aoAvaliar = null }
     }
+    LaunchedEffect(sentidos.semGps) { if (sentidos.semGps) avisarDefeito() }
 
     LaunchedEffect(Unit) {
         var ultimoAviso = 0L
@@ -182,9 +292,8 @@ fun EtapaCaminhada(
             val ligadaAgora = gpsLigado(ctx)
             if (ligadaAgora != ligada) Log.i(TAG, "Caminhada: localização ${if (ligadaAgora) "ligada" else "desligada"}")
             ligada = ligadaAgora
-            permitida = Poder.LOCALIZACAO.liberado(ctx) // liberada nas Configurações, ou tirada no meio
-            val andando = recente(leitura, agora)?.movimento == Movimento.ANDANDO
-            if (andando != andavaAntes) Log.i(TAG, "Caminhada: ${retorno(recente(leitura, agora)).second}, ${andadoMs / 1000} s de ${meta / 1000}")
+            val andando = recente(sentidos.leitura, agora)?.avaliacao?.valeProBipe == true
+            if (andando != andavaAntes) Log.i(TAG, "Caminhada: ${retorno(recente(sentidos.leitura, agora)).second}, ${andadoMs / 1000} s de ${meta / 1000}")
             // A cada segundo andando, e no instante em que parou: a contagem pro bipe começa daí
             if (andando && agora - ultimoAviso >= AVISO_ANDANDO_MS || andavaAntes && !andando) {
                 avisarAndando(andadoMs)
@@ -199,18 +308,23 @@ fun EtapaCaminhada(
         }
     }
 
-    val andando = recente(leitura, agora)?.movimento == Movimento.ANDANDO
+    val leitura = recente(sentidos.leitura, agora)
+    val andando = leitura?.avaliacao?.valeProBipe == true
     val (corAlvo, status) = when {
-        !permitida -> VermelhoParado to "A localização está sem permissão"
+        !sentidos.permitida -> VermelhoParado to "A localização está sem permissão"
         !ligada -> VermelhoParado to "Ligue a localização"
-        else -> retorno(recente(leitura, agora))
+        else -> retorno(leitura)
     }
     val cor by animateColorAsState(corAlvo, label = "cor da caminhada")
-    val noPrazo = avisoDoPrazo(agora, prazoAte)
+    val noPrazo = if (detalhar) "Teste do GPS: sem bipes" else avisoDoPrazo(agora, prazoAte)
     val bipeEm = if (andando) null else segundosProBipe(agora, ultimoPasso, prazoAte)
+    val metaSegura = metaMs.coerceAtLeast(1)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(ANEL), contentAlignment = Alignment.Center) {
-            AnelDaCaminhada((andadoMs.toFloat() / metaMs.coerceAtLeast(1)).coerceIn(0f, 1f), cor, Modifier.fillMaxSize())
+            AnelDaCaminhada(
+                (andadoMs.toFloat() / metaSegura).coerceIn(0f, 1f), ((andadoMs + conferindoMs).toFloat() / metaSegura).coerceIn(0f, 1f),
+                cor, Modifier.fillMaxSize(),
+            )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(tempoAndado(andadoMs), color = VinhoAlarme, fontSize = 56.sp, fontWeight = FontWeight.Black)
                 Text("de ${tempoAndado(metaMs)} andando", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 18.sp)
@@ -225,7 +339,7 @@ fun EtapaCaminhada(
             val aviso = bipeEm?.let { if (it > 0) "Bipe em $it s" else "🔊 Anda que o bipe para" }.orEmpty()
             Text(aviso, color = VermelhoParado, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
         }
-        if (!permitida) {
+        if (!sentidos.permitida) {
             Spacer(Modifier.height(12.dp))
             PedirLocalizacao()
         } else if (!ligada) {
@@ -233,7 +347,7 @@ fun EtapaCaminhada(
             BotaoGrande("LIGAR LOCALIZAÇÃO", { desbloquear(activity) { abrirLocalizacao(ctx) } }, fundoClaro = true)
         }
         Spacer(Modifier.height(12.dp))
-        Trilha(trilha, Modifier.size(TRILHA_TAMANHO))
+        Trilha(sentidos.trilha, Modifier.size(TRILHA_TAMANHO))
         Text("Sua trilha: verde onde contou", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
         Text("Só conta saindo do lugar, a pé, na rua", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
@@ -244,35 +358,34 @@ private val TRILHA_TAMANHO = 180.dp
 
 /**
  * A trilha da caminhada vista de cima (norte pra cima), na escala que cabe tudo ([TRILHA_LADO_MIN_M] no mínimo):
- * verde onde contou como andando, cinza onde não; no ponto de agora, o círculo da incerteza do GPS. Parado
- * balançando o braço, os pontos ficam embolados num lugar só.
+ * verde onde contou, verde claro onde ainda está conferindo, cinza onde não contou. É o caminho filtrado, não o GPS
+ * cru: parado, o ponto não escorrega; um salto do GPS não aparece.
  */
 @Composable
 private fun Trilha(pontos: List<PontoDaTrilha>, modifier: Modifier) {
     Canvas(modifier.clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.6f))) {
-        val agora = pontos.lastOrNull() ?: return@Canvas
-        val metros = pontos.map { emMetros(agora.fixo, it.fixo) }
-        val minX = metros.minOf { it.first }
-        val maxX = metros.maxOf { it.first }
-        val minY = metros.minOf { it.second }
-        val maxY = metros.maxOf { it.second }
+        if (pontos.isEmpty()) return@Canvas
+        val minX = pontos.minOf { it.leste }
+        val maxX = pontos.maxOf { it.leste }
+        val minY = pontos.minOf { it.norte }
+        val maxY = pontos.maxOf { it.norte }
         val lado = maxOf(TRILHA_LADO_MIN_M, (maxX - minX) * 1.2, (maxY - minY) * 1.2)
         val pxPorM = (minOf(size.width, size.height) / lado).toFloat()
         val meioX = (minX + maxX) / 2
         val meioY = (minY + maxY) / 2
-        fun ponto(m: Pair<Double, Double>) = Offset(
-            size.width / 2 + ((m.first - meioX) * pxPorM).toFloat(),
-            size.height / 2 - ((m.second - meioY) * pxPorM).toFloat(), // norte pra cima
+        fun ponto(p: PontoDaTrilha) = Offset(
+            size.width / 2 + ((p.leste - meioX) * pxPorM).toFloat(),
+            size.height / 2 - ((p.norte - meioY) * pxPorM).toFloat(), // norte pra cima
         )
         for (i in 1 until pontos.size) {
-            drawLine(
-                if (pontos[i].andando) VerdeAndando else CinzaParado, ponto(metros[i - 1]), ponto(metros[i]),
-                strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round,
-            )
+            val cor = when (pontos[i].trecho) {
+                Trecho.CONTOU -> VerdeAndando
+                Trecho.CONFERINDO -> VerdeConferindo
+                Trecho.NAO -> CinzaParado
+            }
+            drawLine(cor, ponto(pontos[i - 1]), ponto(pontos[i]), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
         }
-        val aqui = ponto(metros.last())
-        agora.fixo.precisaoM?.let { drawCircle(VinhoAlarme.copy(alpha = 0.12f), radius = it * pxPorM, center = aqui) }
-        drawCircle(VinhoAlarme, radius = 6.dp.toPx(), center = aqui)
+        drawCircle(VinhoAlarme, radius = 6.dp.toPx(), center = ponto(pontos.last()))
     }
 }
 
@@ -282,24 +395,24 @@ private fun Trilha(pontos: List<PontoDaTrilha>, modifier: Modifier) {
  */
 fun gpsLigado(ctx: Context): Boolean = ctx.getSystemService(LocationManager::class.java).isProviderEnabled(LocationManager.GPS_PROVIDER)
 
-/** O último fixo, se ainda vale (chegou há até [FIXO_VELHO_MS]); senão null: sem sinal. */
+/** A última leitura, se ainda vale (chegou há até [FIXO_VELHO_MS]); senão null: sem sinal. */
 private fun recente(leitura: LeituraGps?, agora: Long): LeituraGps? = leitura?.takeIf { agora - it.quando <= FIXO_VELHO_MS }
 
-/** O retorno de cada leitura do GPS (null = sem sinal): cor (verde andando, vermelho no resto) e mensagem. */
+/** O retorno de cada leitura do GPS (null = sem sinal): cor (verde andando, verde claro conferindo, vermelho no resto) e mensagem. */
 private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
     if (leitura == null) return VermelhoParado to "Sem sinal de GPS: vá pra rua, longe de prédios"
-    val v = leitura.velocidade?.let(::textoDaVelocidade).orEmpty()
-    return when (leitura.movimento) {
-        Movimento.ANDANDO -> VerdeAndando to "Andando $v ✓"
-        // O porquê, do jeito que a regra viu (avaliar): pra pessoa saber o que fazer
-        Movimento.PARADO -> VermelhoParado to when (leitura.motivo) {
-            "sem janela" -> "Conferindo se você saiu do lugar…"
-            "pulo" -> "O GPS pulou: continua andando"
-            "vai e volta" -> "Indo e voltando não conta: anda pra frente"
-            "terço virou" -> "Virou: segue reto um pouco que volta a contar"
-            "rumo" -> "Balançar o celular não conta: anda pra frente"
-            "curto sem rumo" -> "Conferindo (o GPS não diz a direção)…"
-            else -> "Parado: anda!"
+    val avaliacao = leitura.avaliacao
+    return when (avaliacao.movimento) {
+        Movimento.ANDANDO -> VerdeAndando to "Andando ${avaliacao.velocidade?.let(::textoDaVelocidade).orEmpty()} ✓"
+        Movimento.CONFERINDO -> VerdeConferindo to "Andando… conferindo"
+        // O porquê, do jeito que a regra viu: pra pessoa saber o que fazer
+        Movimento.PARADO -> when (avaliacao.motivo) {
+            "começando" -> VerdeConferindo to "Começando a andar…"
+            "no lugar" -> VermelhoParado to "Passos sem sair do lugar não contam: vá pra rua"
+            "passada longa" -> VermelhoParado to "Só vale a pé"
+            "rumo" -> VermelhoParado to "Balançar o celular não conta: anda pra frente"
+            "não saiu do lugar" -> VermelhoParado to "O GPS não te vê saindo do lugar: vá pra rua"
+            else -> VermelhoParado to "Parado: anda!"
         }
         Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais: só vale a pé"
         Movimento.IMPRECISO -> VermelhoParado to "GPS fraco${leitura.precisao?.let { " (±${it.roundToInt()} m)" }.orEmpty()}: vá pra rua, longe de prédios"
@@ -318,36 +431,81 @@ private fun fixoDe(local: Location) = Fixo(
     precisaoVelocidade = if (local.hasSpeedAccuracy()) local.speedAccuracyMetersPerSecond else null,
     falso = localizacaoFalsa(local),
     rumo = if (local.hasBearing()) local.bearing else null,
+    precisaoRumo = if (local.hasBearingAccuracy()) local.bearingAccuracyDegrees else null,
 )
 
 /**
- * O resumo do GPS no log a cada 30 s, pra ajustar as regras com o GPS de verdade: quantos fixos, a precisão do meio,
- * em quantos ele mediu velocidade e rumo, e o que a regra disse de cada um ([Avaliacao.motivo]). Sem as coordenadas
- * (privacidade): só números.
+ * O sinal médio (dB-Hz) dos 4 satélites mais fortes usados no fixo, só da banda L1 (o S24 FE ouve também a L5, que
+ * mistura a conta); null sem nenhum. Na rua, andando, deu 41 a 46; dentro de casa, parado, 36 a 37 (10-17): ainda
+ * só pro log, pra calibrar um dia um "céu aberto".
+ */
+fun sinalDaL1(status: GnssStatus): Float? {
+    val l1 = (0 until status.satelliteCount).filter {
+        status.usedInFix(it) && status.hasCarrierFrequencyHz(it) && status.getCarrierFrequencyHz(it) in 1_559e6f..1_610e6f
+    }
+    return l1.map(status::getCn0DbHz).sortedDescending().take(4).takeIf { it.isNotEmpty() }?.average()?.toFloat()
+}
+
+/**
+ * O resumo da caminhada no log a cada 30 s, pra ajustar as regras com o GPS de verdade: quantos fixos, a precisão do
+ * meio, a velocidade do GPS e os passos por minuto do meio, o sinal do céu, quanto somou, e o que a regra disse de
+ * cada um ([Avaliacao.motivo]). Sem as coordenadas (privacidade): só números.
  */
 private class ResumoDoGps {
     private var desde = 0L
     private val precisoes = mutableListOf<Float>()
-    private var comVelocidade = 0
-    private var comRumo = 0
+    private val velocidades = mutableListOf<Float>()
+    private val cadencias = mutableListOf<Float>()
+    private val ceus = mutableListOf<Float>()
+    private var somado = 0L
     private val motivos = mutableMapOf<String, Int>()
 
-    fun somar(fixo: Fixo, avaliacao: Avaliacao, agora: Long) {
+    fun somar(fixo: Fixo, avaliacao: Avaliacao, agora: Long, ceu: Float?) {
         if (desde == 0L) desde = agora
         fixo.precisaoM?.let { precisoes += it }
-        if (fixo.velocidadeMs != null) comVelocidade++
-        if (fixo.rumo != null) comRumo++
+        avaliacao.velocidade?.let { velocidades += it }
+        avaliacao.cadencia?.let { cadencias += it }
+        ceu?.let { ceus += it }
+        somado += avaliacao.soma
         motivos[avaliacao.motivo] = (motivos[avaliacao.motivo] ?: 0) + 1
         if (agora - desde < 30_000) return
-        val total = motivos.values.sum()
-        val meio = precisoes.sorted().getOrNull(precisoes.size / 2)?.roundToInt()
-        Log.i(TAG, "Caminhada (30 s): $total fixos, precisão do meio ±$meio m, velocidade em $comVelocidade, rumo em $comRumo; $motivos")
+        fun meio(lista: List<Float>) = lista.sorted().getOrNull(lista.size / 2)
+        Log.i(
+            TAG,
+            String.format(
+                Locale.ROOT, "Caminhada (30 s): %d fixos, precisão ±%s m, GPS %s m/s, %s passos/min, céu %s dB-Hz, somou %d s, conferindo %d s; %s",
+                motivos.values.sum(), meio(precisoes)?.roundToInt(), meio(velocidades)?.let { "%.1f".format(Locale.ROOT, it) },
+                meio(cadencias)?.roundToInt(), meio(ceus)?.roundToInt(), somado / 1000, avaliacao.conferindo / 1000, motivos,
+            ),
+        )
         desde = agora
         precisoes.clear()
-        comVelocidade = 0
-        comRumo = 0
+        velocidades.clear()
+        cadencias.clear()
+        ceus.clear()
+        somado = 0
         motivos.clear()
     }
+}
+
+/**
+ * Uma linha do log por fixo, no TesteDoGps: onde o [atual] cru está, em metros a leste e ao norte da [origem] do
+ * caminho (sem as coordenadas: privacidade), a precisão, a velocidade e o rumo medidos (com as incertezas), o atraso
+ * do fixo; e o que a regra disse: o movimento e o porquê, o ponto do caminho, a velocidade do meio, os passos por
+ * minuto, a passada, a coerência do rumo, quanto andou na janela (pela posição / pela velocidade, ✓ confirmou), quanto
+ * somou e quanto está conferindo.
+ */
+private fun detalheDoFixo(origem: Fixo, atual: Fixo, local: Location, chegou: Long, a: Avaliacao): String {
+    val (leste, norte) = emMetros(origem, atual)
+    fun num(v: Number?, casas: Int = 1) = v?.let { String.format(Locale.ROOT, "%.${casas}f", it.toDouble()) } ?: "-"
+    val rumoIncerteza = if (local.hasBearingAccuracy()) local.bearingAccuracyDegrees else null
+    return String.format(
+        Locale.ROOT, "GPS %+7.1f L %+7.1f N ±%s v %s±%s r %s±%s atraso %d -> %s %s | caminho %s %s v %s passos %s passada %s coer %s andou %s/%s%s soma %d conf %d",
+        leste, norte, num(atual.precisaoM), num(atual.velocidadeMs, 2), num(atual.precisaoVelocidade, 2), num(atual.rumo, 0), num(rumoIncerteza, 0),
+        chegou - atual.tempoMs, a.movimento, a.motivo, num(a.ponto?.first), num(a.ponto?.second), num(a.velocidade, 2), num(a.cadencia, 0),
+        num(a.passada, 2), num(a.coerencia, 2), num(a.deslocamento?.pelaPosicao), num(a.deslocamento?.pelaVelocidade),
+        if (a.deslocamento?.confirma == true) " ✓" else "", a.soma, a.conferindo,
+    )
 }
 
 /** O fixo veio de um app de localização falsa (opção de desenvolvedor). */
@@ -355,18 +513,19 @@ private class ResumoDoGps {
 private fun localizacaoFalsa(local: Location): Boolean = if (Build.VERSION.SDK_INT >= 31) local.isMock else local.isFromMockProvider
 
 /**
- * Pede ao GPS um fixo por segundo, mesmo parado (distância mínima 0), entregue no fio principal. Sem a permissão,
- * lança SecurityException; celular sem GPS, IllegalArgumentException.
+ * Pede ao GPS um fixo por segundo, mesmo parado (distância mínima 0), e os satélites, entregues no fio principal.
+ * Sem a permissão, lança SecurityException; celular sem GPS, IllegalArgumentException.
  */
 @SuppressLint("MissingPermission") // quem chama trata a falta da permissão
-private fun ouvirGps(gps: LocationManager, ouvinte: LocationListener) {
+private fun ouvirGps(gps: LocationManager, ouvinte: LocationListener, satelites: GnssStatus.Callback, principal: Handler) {
     gps.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVALO_GPS_MS, 0f, ouvinte, Looper.getMainLooper())
+    gps.registerGnssStatusCallback(satelites, principal)
 }
 
 /**
  * Localização sem permissão: desbloqueia o celular, se preciso, e pede no diálogo do sistema (como a câmera, em
  * PedirCamera). Se o Android não mostrar mais o diálogo (negado de vez), abre as Configurações do app, com um tempo
- * sem a tela do alarme voltar por cima. A tela relê a permissão a cada conferência.
+ * sem a tela do alarme voltar por cima. Os sentidos releem a permissão a cada segundo.
  */
 @Composable
 private fun PedirLocalizacao() {
@@ -388,15 +547,23 @@ private fun abrirLocalizacao(ctx: Context) {
         .onFailure { Log.w(TAG, "Caminhada: não abriu as Configurações da localização", it) }
 }
 
-
-/** Trilha fraca do anel inteiro + arco forte com o tempo andado, começando no topo (como o anel da câmera). */
+/**
+ * Trilha fraca do anel inteiro + arco claro até o tempo andado mais o que está conferindo ([conferindo]) + arco
+ * forte com o tempo andado ([progresso]), começando no topo (como o anel da câmera). O forte nunca desce.
+ */
 @Composable
-private fun AnelDaCaminhada(progresso: Float, cor: Color, modifier: Modifier) {
+private fun AnelDaCaminhada(progresso: Float, conferindo: Float, cor: Color, modifier: Modifier) {
     Canvas(modifier) {
         val espessura = 14.dp.toPx()
         val canto = Offset(espessura / 2, espessura / 2)
         val area = Size(size.width - espessura, size.height - espessura)
         drawArc(cor.copy(alpha = 0.25f), 0f, 360f, useCenter = false, topLeft = canto, size = area, style = Stroke(espessura))
+        if (conferindo > progresso) {
+            drawArc(
+                VerdeConferindo.copy(alpha = 0.6f), -90f, 360f * conferindo, useCenter = false, topLeft = canto, size = area,
+                style = Stroke(espessura, cap = StrokeCap.Round),
+            )
+        }
         drawArc(
             cor, -90f, 360f * progresso, useCenter = false, topLeft = canto, size = area,
             style = Stroke(espessura, cap = StrokeCap.Round),

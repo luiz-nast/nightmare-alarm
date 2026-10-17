@@ -113,6 +113,15 @@
             android:permission="android.permission.DUMP"
             android:taskAffinity="" />
 
+        <!-- Teste do GPS da caminhada, sem alarme e sem som, só pelo cabo, como o TesteDoSom. Veja TesteDoGps.kt -->
+        <activity
+            android:name=".TesteDoGps"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:taskAffinity="" />
+
         <!-- Encerrar o alarme em andamento, só pelo cabo (permissão DUMP, como o TesteDaIa). Veja PararPeloCabo.kt -->
         <receiver
             android:name=".PararPeloCabo"
