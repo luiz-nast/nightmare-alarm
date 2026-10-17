@@ -21,17 +21,17 @@ import androidx.core.net.toUri
  */
 enum class Poder(val titulo: String, val explicacao: String, val permissao: String? = null) {
     NOTIFICACOES(
-        "Notificações",
-        "Sem isso o alarme não consegue aparecer.",
+        "Notifications",
+        "Without it the alarm cannot show up.",
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.POST_NOTIFICATIONS else null,
     ),
-    MICROFONE("Microfone", "Pra ouvir você dizer STOP.", Manifest.permission.RECORD_AUDIO),
-    CAMERA("Câmera", "Pra conferir que você está de olhos abertos.", Manifest.permission.CAMERA),
-    LOCALIZACAO("Localização", "Pra contar a caminhada da manhã, pelo GPS.", Manifest.permission.ACCESS_FINE_LOCATION),
-    ALARME_EXATO("Alarme no minuto exato", "Toca na hora certa mesmo com o celular dormindo."),
-    TELA_CHEIA("Tela cheia", "Deixa o alarme tomar a tela, mesmo bloqueada."),
-    CANAL("Alerta em destaque", "O canal \"Alarme tocando\" precisa estar com importância alta."),
-    BATERIA("Bateria sem restrição", "Impede o celular de colocar o app pra dormir.");
+    MICROFONE("Microphone", "To hear you say STOP.", Manifest.permission.RECORD_AUDIO),
+    CAMERA("Camera", "To check that your eyes are open.", Manifest.permission.CAMERA),
+    LOCALIZACAO("Location", "To count the morning walk, by GPS.", Manifest.permission.ACCESS_FINE_LOCATION),
+    ALARME_EXATO("Alarm on the exact minute", "Rings on time even with the phone asleep."),
+    TELA_CHEIA("Full screen", "Lets the alarm take over the screen, even when locked."),
+    CANAL("Prominent alert", "The \"Alarm ringing\" channel needs high importance."),
+    BATERIA("Unrestricted battery", "Keeps the phone from putting the app to sleep.");
 
     fun liberado(ctx: Context): Boolean = when (this) {
         NOTIFICACOES -> NotificationManagerCompat.from(ctx).areNotificationsEnabled()

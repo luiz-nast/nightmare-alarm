@@ -53,8 +53,8 @@ data class Alarme(
 ) {
     val horario: String get() = hhmm(hora, minuto)
 
-    /** Nome pra mostrar: o rótulo, ou "Alarme" se ele estiver em branco. */
-    val nome: String get() = rotulo.ifBlank { "Alarme" }
+    /** Nome pra mostrar: o rótulo, ou "Alarm" se ele estiver em branco. */
+    val nome: String get() = rotulo.ifBlank { "Alarm" }
 
     /** Um dos alarmes dos botões de teste ([ID_TESTE] e [ID_TESTE_CAMINHADA]): cada etapa pede bem menos tempo (veja [metaOlhar]). */
     val deTeste: Boolean get() = id == ID_TESTE || id == ID_TESTE_CAMINHADA
@@ -96,9 +96,9 @@ data class Alarme(
         /** O alarme de um botão de teste: "câmera + frases", ou com [caminhada], "conversa + caminhada". */
         fun teste(caminhada: Boolean = false) =
             if (caminhada) {
-                Alarme(id = ID_TESTE_CAMINHADA, hora = 0, minuto = 0, rotulo = "Teste conversa + caminhada", caminhada = true)
+                Alarme(id = ID_TESTE_CAMINHADA, hora = 0, minuto = 0, rotulo = "Test talk + walk", caminhada = true)
             } else {
-                Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste câmera + frases")
+                Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Test camera + phrases")
             }
 
         fun deJson(o: JSONObject): Alarme {

@@ -131,7 +131,7 @@ fun PaginaYoutube(youtube: YoutubeDaMissao) {
     Box(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding(), contentAlignment = Alignment.Center) {
         val web = youtube.web
         if (web == null) {
-            val aviso = if (youtube.caiu) "O YouTube travou. Deslize pra câmera e volte pra abrir de novo." else "Abrindo o YouTube…"
+            val aviso = if (youtube.caiu) "YouTube froze. Swipe to the camera and back to open it again." else "Opening YouTube…"
             Text(aviso, color = VinhoAlarme, fontSize = 18.sp, modifier = Modifier.padding(32.dp))
         } else {
             // Um navegador novo (depois de cair) precisa de um AndroidView novo

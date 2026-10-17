@@ -311,12 +311,12 @@ fun EtapaCaminhada(
     val leitura = recente(sentidos.leitura, agora)
     val andando = leitura?.avaliacao?.valeProBipe == true
     val (corAlvo, status) = when {
-        !sentidos.permitida -> VermelhoParado to "A localização está sem permissão"
-        !ligada -> VermelhoParado to "Ligue a localização"
+        !sentidos.permitida -> VermelhoParado to "Location has no permission"
+        !ligada -> VermelhoParado to "Turn on location"
         else -> retorno(leitura)
     }
     val cor by animateColorAsState(corAlvo, label = "cor da caminhada")
-    val noPrazo = if (detalhar) "Teste do GPS: sem bipes" else avisoDoPrazo(agora, prazoAte)
+    val noPrazo = if (detalhar) "GPS test: no beeps" else avisoDoPrazo(agora, prazoAte)
     val bipeEm = if (andando) null else segundosProBipe(agora, ultimoPasso, prazoAte)
     val metaSegura = metaMs.coerceAtLeast(1)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -327,7 +327,7 @@ fun EtapaCaminhada(
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(tempoAndado(andadoMs), color = VinhoAlarme, fontSize = 56.sp, fontWeight = FontWeight.Black)
-                Text("de ${tempoAndado(metaMs)} andando", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 18.sp)
+                Text("of ${tempoAndado(metaMs)} walking", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 18.sp)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -336,7 +336,7 @@ fun EtapaCaminhada(
         if (noPrazo != null) {
             Text(noPrazo, color = VinhoAlarme, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         } else {
-            val aviso = bipeEm?.let { if (it > 0) "Bipe em $it s" else "🔊 Anda que o bipe para" }.orEmpty()
+            val aviso = bipeEm?.let { if (it > 0) "Beep in $it s" else "🔊 Walk and the beep stops" }.orEmpty()
             Text(aviso, color = VermelhoParado, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
         }
         if (!sentidos.permitida) {
@@ -344,13 +344,13 @@ fun EtapaCaminhada(
             PedirLocalizacao()
         } else if (!ligada) {
             Spacer(Modifier.height(12.dp))
-            BotaoGrande("LIGAR LOCALIZAÇÃO", { desbloquear(activity) { abrirLocalizacao(ctx) } }, fundoClaro = true)
+            BotaoGrande("TURN ON LOCATION", { desbloquear(activity) { abrirLocalizacao(ctx) } }, fundoClaro = true)
         }
         Spacer(Modifier.height(12.dp))
         Trilha(sentidos.trilha, Modifier.size(TRILHA_TAMANHO))
-        Text("Sua trilha: verde onde contou", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 14.sp)
+        Text("Your trail: green where it counted", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
-        Text("Só conta saindo do lugar, a pé, na rua", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+        Text("Only walking counts, outdoors, on foot", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
     }
 }
 
@@ -400,23 +400,23 @@ private fun recente(leitura: LeituraGps?, agora: Long): LeituraGps? = leitura?.t
 
 /** O retorno de cada leitura do GPS (null = sem sinal): cor (verde andando, verde claro conferindo, vermelho no resto) e mensagem. */
 private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
-    if (leitura == null) return VermelhoParado to "Sem sinal de GPS: vá pra rua, longe de prédios"
+    if (leitura == null) return VermelhoParado to "No GPS signal: go outside, away from buildings"
     val avaliacao = leitura.avaliacao
     return when (avaliacao.movimento) {
-        Movimento.ANDANDO -> VerdeAndando to "Andando ${avaliacao.velocidade?.let(::textoDaVelocidade).orEmpty()} ✓"
-        Movimento.CONFERINDO -> VerdeConferindo to "Andando… conferindo"
+        Movimento.ANDANDO -> VerdeAndando to "Walking ${avaliacao.velocidade?.let(::textoDaVelocidade).orEmpty()} ✓"
+        Movimento.CONFERINDO -> VerdeConferindo to "Walking… checking"
         // O porquê, do jeito que a regra viu: pra pessoa saber o que fazer
         Movimento.PARADO -> when (avaliacao.motivo) {
-            "começando" -> VerdeConferindo to "Começando a andar…"
-            "no lugar" -> VermelhoParado to "Passos sem sair do lugar não contam: vá pra rua"
-            "passada longa" -> VermelhoParado to "Só vale a pé"
-            "rumo" -> VermelhoParado to "Balançar o celular não conta: anda pra frente"
-            "não saiu do lugar" -> VermelhoParado to "O GPS não te vê saindo do lugar: vá pra rua"
-            else -> VermelhoParado to "Parado: anda!"
+            "começando" -> VerdeConferindo to "Starting to walk…"
+            "no lugar" -> VermelhoParado to "Steps in place do not count: go outside"
+            "passada longa" -> VermelhoParado to "Only on foot counts"
+            "rumo" -> VermelhoParado to "Shaking the phone does not count: walk forward"
+            "não saiu do lugar" -> VermelhoParado to "The GPS does not see you moving: go outside"
+            else -> VermelhoParado to "Stopped: walk!"
         }
-        Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais: só vale a pé"
-        Movimento.IMPRECISO -> VermelhoParado to "GPS fraco${leitura.precisao?.let { " (±${it.roundToInt()} m)" }.orEmpty()}: vá pra rua, longe de prédios"
-        Movimento.FALSO -> VermelhoParado to "Localização falsa não vale"
+        Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Too fast: only on foot counts"
+        Movimento.IMPRECISO -> VermelhoParado to "Weak GPS${leitura.precisao?.let { " (±${it.roundToInt()} m)" }.orEmpty()}: go outside, away from buildings"
+        Movimento.FALSO -> VermelhoParado to "Fake location does not count"
     }
 }
 
@@ -537,7 +537,7 @@ private fun PedirLocalizacao() {
             Poder.LOCALIZACAO.abrirConfiguracao(ctx)
         }
     }
-    BotaoGrande("LIBERAR LOCALIZAÇÃO", { desbloquear(activity) { pedir.launch(Poder.LOCALIZACAO.pedido) } }, fundoClaro = true)
+    BotaoGrande("ALLOW LOCATION", { desbloquear(activity) { pedir.launch(Poder.LOCALIZACAO.pedido) } }, fundoClaro = true)
 }
 
 /** Abre a localização nas Configurações, numa tarefa separada (como [Poder.abrirConfiguracao]), com um tempo sem a tela do alarme voltar por cima. */

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compila o app e instala no celular conectado por adb (cabo USB ou depuração sem fio).
-# Requisitos: JDK 17+ (JAVA_HOME ou java no PATH) e Android SDK (ANDROID_HOME ou ~/Android/Sdk).
+# Builds the app and installs it on the phone connected through adb (USB cable or wireless debugging).
+# Requirements: JDK 17+ (JAVA_HOME or java on the PATH) and the Android SDK (ANDROID_HOME or ~/Android/Sdk).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,7 +11,7 @@ fi
 ADB="$ANDROID_HOME/platform-tools/adb"
 
 if [ "$("$ADB" get-state 2> /dev/null)" != "device" ]; then
-    echo "Nenhum celular pronto. Ative a Depuração USB, conecte o cabo e toque em \"Permitir\" no celular."
+    echo "No phone ready. Turn on USB debugging, plug in the cable and tap \"Allow\" on the phone."
     "$ADB" devices -l
     exit 1
 fi
@@ -19,4 +19,4 @@ fi
 ./gradlew --console=plain assembleRelease
 "$ADB" install -r app/build/outputs/apk/release/app-release.apk
 "$ADB" shell am start -n com.implacavel.alarme/.MainActivity > /dev/null
-echo "Pronto! O Alarme Implacável está aberto no celular."
+echo "Done! Nightmare Alarm is open on the phone."

@@ -14,8 +14,8 @@ object Notificacoes {
     const val ID_CHAMADA = 2
 
     fun criarCanal(ctx: Context) {
-        val canal = NotificationChannel(CANAL_ALARME, "Alarme tocando", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Aparece em tela cheia quando um alarme dispara"
+        val canal = NotificationChannel(CANAL_ALARME, "Alarm ringing", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Shows in full screen when an alarm goes off"
             // Canal mudo de propósito: som e vibração vêm da Sirene, no volume de alarme e sem parar sozinhos
             setSound(null, null)
             enableVibration(false)

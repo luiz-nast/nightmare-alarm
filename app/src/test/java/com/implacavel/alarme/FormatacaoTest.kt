@@ -18,18 +18,18 @@ class FormatacaoTest {
 
     @Test
     fun resumoDosDias() {
-        assertEquals("Uma vez", resumoDias(emptySet()))
-        assertEquals("Todo dia", resumoDias((1..7).toSet()))
-        assertEquals("Dias úteis", resumoDias(setOf(1, 2, 3, 4, 5)))
-        assertEquals("Fim de semana", resumoDias(setOf(6, 7)))
-        assertEquals("dom, qua", resumoDias(setOf(3, 7)))
+        assertEquals("Once", resumoDias(emptySet()))
+        assertEquals("Every day", resumoDias((1..7).toSet()))
+        assertEquals("Weekdays", resumoDias(setOf(1, 2, 3, 4, 5)))
+        assertEquals("Weekends", resumoDias(setOf(6, 7)))
+        assertEquals("Sun, Wed", resumoDias(setOf(3, 7)))
     }
 
     @Test
     fun tempoAteOAlarme() {
-        assertEquals("em 9 h 12 min", tempoAte(em(9, 29, 21, 48), em(9, 30, 7, 0)))
-        assertEquals("em 1 min", tempoAte(em(9, 29, 21, 48).plusSeconds(10), em(9, 29, 21, 49)))
-        assertEquals("em 2 d 1 h", tempoAte(em(9, 29, 6, 0), em(10, 1, 7, 0)))
+        assertEquals("in 9 h 12 min", tempoAte(em(9, 29, 21, 48), em(9, 30, 7, 0)))
+        assertEquals("in 1 min", tempoAte(em(9, 29, 21, 48).plusSeconds(10), em(9, 29, 21, 49)))
+        assertEquals("in 2 d 1 h", tempoAte(em(9, 29, 6, 0), em(10, 1, 7, 0)))
     }
 
     @Test

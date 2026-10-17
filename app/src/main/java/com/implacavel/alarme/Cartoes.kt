@@ -42,12 +42,12 @@ import kotlin.math.roundToInt
 fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
     val proximo = alarmes.filter { it.ativo }.map { it.proximoDisparo(agora) }.minByOrNull { it.toEpochSecond() }
     Column(Modifier.padding(top = 16.dp, bottom = 4.dp)) {
-        Text("Alarme Implacável", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Nightmare Alarm", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(
             if (proximo == null) {
-                "Nenhum alarme ligado"
+                "No alarm on"
             } else {
-                "Próximo: ${NOME_CURTO_DIA.getValue(proximo.dayOfWeek.value)}, " +
+                "Next: ${NOME_CURTO_DIA.getValue(proximo.dayOfWeek.value)}, " +
                     "${hhmm(proximo.toLocalTime())} · ${tempoAte(agora, proximo)}"
             },
             style = MaterialTheme.typography.bodyLarge,
@@ -98,11 +98,11 @@ fun SecaoRecolhivel(titulo: String, resumo: String, alerta: Boolean, conteudo: @
 fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
     val faltam = poderes.count { !it.value }
     val resumo = when (faltam) {
-        0 -> "✓ Todas liberadas: o alarme toca bloqueado, no silencioso e no Não Perturbe"
-        1 -> "⚠ Falta 1 pro alarme ser implacável"
-        else -> "⚠ Faltam $faltam pro alarme ser implacável"
+        0 -> "✓ All allowed: the alarm rings locked, on silent and on Do Not Disturb"
+        1 -> "⚠ 1 missing for a relentless alarm"
+        else -> "⚠ $faltam missing for a relentless alarm"
     }
-    SecaoRecolhivel("Permissões", resumo, alerta = faltam > 0) {
+    SecaoRecolhivel("Permissions", resumo, alerta = faltam > 0) {
         poderes.forEach { (poder, liberado) ->
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -110,13 +110,13 @@ fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
                     Text(poder.explicacao, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.width(8.dp))
-                if (liberado) Text("✓", fontSize = 20.sp, fontWeight = FontWeight.Bold) else Button(onClick = { onLiberar(poder) }) { Text("Liberar") }
+                if (liberado) Text("✓", fontSize = 20.sp, fontWeight = FontWeight.Bold) else Button(onClick = { onLiberar(poder) }) { Text("Allow") }
             }
         }
         if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
             Text(
-                "Samsung: em Configurações › Bateria › Limites de uso em segundo plano, confira que o app " +
-                    "não está em \"Apps em suspensão\" nem em \"Apps em suspensão profunda\".",
+                "Samsung: in Settings › Battery › Background usage limits, check that the app " +
+                    "is not in \"Sleeping apps\" or \"Deep sleeping apps\".",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 12.dp),
             )
@@ -131,16 +131,16 @@ fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
  */
 @Composable
 fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -> Unit) {
-    SecaoRecolhivel("Testes", "Tocam em 10 s, pra conferir o alarme", alerta = false) {
-        OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Testar câmera + frases") }
-        OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Testar conversa + caminhada") }
+    SecaoRecolhivel("Tests", "Ring in 10 s, to check the alarm", alerta = false) {
+        OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Test camera + phrases") }
+        OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Test talk + walk") }
         Text(
-            "Câmera + frases: 30 s de câmera, com as frases no meio. Conversa + caminhada: 5 min de conversa, 30 s pra sair e 8 min andando.",
+            "Camera + phrases: 30 s of camera, with the phrases in the middle. Talk + walk: 5 min of talk, 30 s to go out and 8 min of walking.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )
         Text(
-            if (iaPronta) "IA do celular pronta (Gemma 4 E2B, sem internet)" else "IA do celular sem o modelo: o teste vai direto pra caminhada",
+            if (iaPronta) "Phone AI ready (Gemma 4 E2B, no internet)" else "Phone AI without the model: the test goes straight to the walk",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )
@@ -154,9 +154,9 @@ fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -
 @Composable
 fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit) {
     var arrastando by remember(volumeDaVoz) { mutableFloatStateOf(volumeDaVoz) }
-    SecaoRecolhivel("Ajustes", "Voz do app: ${porcento(volumeDaVoz)}%", alerta = false) {
+    SecaoRecolhivel("Settings", "App voice: ${porcento(volumeDaVoz)}%", alerta = false) {
         Text(
-            "Volume da voz: ${porcento(arrastando)}%",
+            "Voice volume: ${porcento(arrastando)}%",
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 8.dp),
@@ -169,7 +169,7 @@ fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit) {
             steps = ((1f - VOLUME_DA_VOZ_MIN) / 0.05f).roundToInt() - 1,
         )
         Text(
-            "O bom dia, as frases e a IA. A música, os bipes e os avisos não mudam.",
+            "The good morning, the phrases and the AI. The music, the beeps and the notices do not change.",
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -181,16 +181,16 @@ fun CartaoMusica(nome: String?, onEscolher: () -> Unit, onTirar: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Música do alarme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Alarm music", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    nome ?: "Toque de alarme do celular",
+                    nome ?: "Phone alarm ringtone",
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (nome != null) TextButton(onClick = onTirar) { Text("Tirar") }
-            Button(onClick = onEscolher) { Text("Escolher") }
+            if (nome != null) TextButton(onClick = onTirar) { Text("Remove") }
+            Button(onClick = onEscolher) { Text("Choose") }
         }
     }
 }
@@ -208,16 +208,16 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                 )
                 Text(
                     when {
-                        alarme.remedio -> "lembrete: toque suave"
-                        alarme.caminhada -> "conversa + caminhada: 10 min de IA e 16 min andando"
-                        else -> "câmera + frases: 40 min de câmera"
+                        alarme.remedio -> "reminder: gentle tone"
+                        alarme.caminhada -> "talk + walk: 10 min of AI and 16 min of walking"
+                        else -> "camera + phrases: 40 min of camera"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 if (alarme.ativo) {
                     Text(
-                        "Toca ${tempoAte(agora, alarme.proximoDisparo(agora))}",
+                        "Rings ${tempoAte(agora, alarme.proximoDisparo(agora))}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

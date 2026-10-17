@@ -128,7 +128,7 @@ private val ANEL_CONVERSA = 190.dp
 fun EtapaDesbloquear() {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
-    AvisoComBotao("Desbloqueie o celular\npra fazer a missão", "DESBLOQUEAR") {
+    AvisoComBotao("Unlock the phone\nto do the mission", "UNLOCK") {
         AlarmeService.darTempo(ctx)
         desbloquear(activity) {}
     }
@@ -170,10 +170,10 @@ fun EtapaFalar(metaMs: Long, onStop: () -> Unit) {
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(if (janelaDeEscuta) "🎤 Fala agora!" else "Pra desligar, diga", color = Color.White, fontSize = 20.sp)
+        Text(if (janelaDeEscuta) "🎤 Speak now!" else "To turn it off, say", color = Color.White, fontSize = 20.sp)
         Text("STOP", color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Black)
         Text(
-            if (ouvido.isBlank()) "" else "Ouvi: \"$ouvido\"",
+            if (ouvido.isBlank()) "" else "Heard: \"$ouvido\"",
             color = Color.White.copy(alpha = 0.8f),
             fontSize = 16.sp,
             textAlign = TextAlign.Center,
@@ -181,11 +181,11 @@ fun EtapaFalar(metaMs: Long, onStop: () -> Unit) {
         )
         if (olhado > 0) {
             Spacer(Modifier.height(8.dp))
-            Text("Anel guardado: faltam ${tempoRestante(metaMs - olhado)}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Ring saved: ${tempoRestante(metaMs - olhado)} left", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
         if (semVoz) {
             Spacer(Modifier.height(12.dp))
-            AvisoComBotao("Reconhecimento de voz indisponível", "PARAR A MÚSICA", onClick = onStop)
+            AvisoComBotao("Speech recognition unavailable", "STOP THE MUSIC", onClick = onStop)
         }
     }
 }
@@ -254,20 +254,20 @@ fun EtapaVerificacao(passo: Verificacao) {
             Spacer(Modifier.height(8.dp))
             // O que o reconhecedor está ouvindo, em tempo real (as últimas palavras); duas linhas sempre, pra tela não pular
             Text(
-                if (passo.suaVez && ouvido.isNotBlank()) "Ouvi: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
+                if (passo.suaVez && ouvido.isNotBlank()) "Heard: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
                 color = VinhoAlarme.copy(alpha = 0.7f),
                 fontSize = 16.sp,
                 textAlign = TextAlign.Center,
                 minLines = 2,
                 maxLines = 2,
             )
-            Text("Frase ${passo.numero} de $FRASES_POR_VERIFICACAO", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+            Text("Phrase ${passo.numero} of $FRASES_POR_VERIFICACAO", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
         }
         Spacer(Modifier.height(12.dp))
-        Text(if (passo.suaVez) "🎤 Sua vez" else "", color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(if (passo.suaVez) "🎤 Your turn" else "", color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         // Como na câmera: sem resposta há um tempo, quanto falta pra zerar
         val zeraEm = if (passo.suaVez && semResposta >= SILENCIO_APITO_MS) ceil((SILENCIO_ZERA_MS - semResposta) / 1000.0).toInt().coerceAtLeast(0) else null
-        Text(zeraEm?.let { "$it s pra zerar" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text(zeraEm?.let { "$it s to reset" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -282,7 +282,7 @@ fun EtapaSaudacao(hora: Int, caminhada: Boolean = false) {
         Text("${saudacao(hora)}!", color = VinhoAlarme, fontSize = 34.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("It's time for the activity check", color = VinhoAlarme, fontSize = 20.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
-        Text(if (caminhada) "Preparando a manhã…" else "A câmera já vai começar", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+        Text(if (caminhada) "Preparing the morning…" else "The camera starts soon", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
     }
 }
 
@@ -309,7 +309,7 @@ fun EtapaConversa(conversa: Conversa) {
             AnelProgresso((conversa.conversadoMs.toFloat() / conversa.metaMs.coerceAtLeast(1)).coerceIn(0f, 1f), VerdeVez, Modifier.fillMaxSize())
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(tempoAndado(conversa.conversadoMs), color = VinhoAlarme, fontSize = 44.sp, fontWeight = FontWeight.Black)
-                Text("de ${tempoAndado(conversa.metaMs)} de conversa", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+                Text("of ${tempoAndado(conversa.metaMs)} of talk", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -323,7 +323,7 @@ fun EtapaConversa(conversa: Conversa) {
         Spacer(Modifier.height(8.dp))
         // Duas linhas sempre, pra tela não pular: o que o reconhecedor está ouvindo (as últimas palavras)
         Text(
-            if (ouvido.isNotBlank()) "Ouvi: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
+            if (ouvido.isNotBlank()) "Heard: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
             color = VinhoAlarme.copy(alpha = 0.7f),
             fontSize = 16.sp,
             textAlign = TextAlign.Center,
@@ -332,9 +332,9 @@ fun EtapaConversa(conversa: Conversa) {
         )
         Spacer(Modifier.height(12.dp))
         val vez = when {
-            conversa.suaVez && conversa.perguntandoSeContinua -> "🎤 Sua vez: yes or no?"
-            conversa.suaVez -> "🎤 Sua vez"
-            conversa.pensando -> "Pensando…"
+            conversa.suaVez && conversa.perguntandoSeContinua -> "🎤 Your turn: yes or no?"
+            conversa.suaVez -> "🎤 Your turn"
+            conversa.pensando -> "Thinking…"
             else -> ""
         }
         Text(vez, color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -342,9 +342,9 @@ fun EtapaConversa(conversa: Conversa) {
         val faltam = ceil((SILENCIO_CONVERSA_MS - calado) / 1000.0).toInt().coerceAtLeast(0)
         val aviso = when {
             !conversa.suaVez || calado < REACAO_CONVERSA_MS -> ""
-            conversa.perguntandoSeContinua -> "$faltam s pra responder"
-            calado < SILENCIO_CONVERSA_MS -> "Bipe em $faltam s"
-            else -> "🔊 Fala que o bipe para"
+            conversa.perguntandoSeContinua -> "$faltam s to answer"
+            calado < SILENCIO_CONVERSA_MS -> "Beep in $faltam s"
+            else -> "🔊 Talk and the beep stops"
         }
         Text(aviso, color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
     }
@@ -357,7 +357,7 @@ fun EtapaFim() {
         Text("Congratulations!", color = VinhoAlarme, fontSize = 34.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("The activity is done", color = VinhoAlarme, fontSize = 20.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
-        Text("Bom retorno às suas atividades", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+        Text("Have a good time getting back to your activities", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
     }
 }
 
@@ -395,7 +395,7 @@ fun EtapaOlhar(
     var quandoLeu by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     if (leitura == Leitura.SEM_CAMERA) {
         // A câmera deu defeito (a permissão existe): sem como conferir os olhos, desliga no botão
-        pagina { AvisoComBotao("A câmera não está funcionando.", "DESLIGAR", fundoClaro = true, onClick = onDefeito) }
+        pagina { AvisoComBotao("The camera is not working.", "TURN OFF", fundoClaro = true, onClick = onDefeito) }
         return
     }
     val avisarOlhando by rememberUpdatedState(onOlhando)
@@ -479,11 +479,11 @@ fun EtapaOlhar(
                         Text(mensagem, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                         // A certeza do detector de que os olhos estão abertos (100% = certeza que sim), e o mínimo pra contar
                         val minimo = porcento(minimoOlhoAberto(metadeVerificada))
-                        Text("Olho aberto: ${aberto?.let { "${porcento(it)}%" } ?: "—"} · mínimo $minimo%", color = cor, fontSize = 16.sp)
-                        Text("Mais ${tempoRestante(metaMs - olhadoMs)} de olhos abertos", color = VinhoAlarme, fontSize = 16.sp)
+                        Text("Eye open: ${aberto?.let { "${porcento(it)}%" } ?: "—"} · minimum $minimo%", color = cor, fontSize = 16.sp)
+                        Text("${tempoRestante(metaMs - olhadoMs)} more with your eyes open", color = VinhoAlarme, fontSize = 16.sp)
                         // Linha sempre presente (vazia enquanto olha), pra tela não pular quando a contagem aparece
-                        Text(zeraEm?.let { "$it s pra zerar" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
-                        Text("👉 Deslize pra direita: YouTube", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+                        Text(zeraEm?.let { "$it s to reset" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                        Text("👉 Swipe right: YouTube", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
                     }
                 }
             }
@@ -495,7 +495,7 @@ fun EtapaOlhar(
             lugarDoCirculo = { lugarDoCirculo },
             progresso = olhadoMs.toFloat() / metaMs,
             cor = cor,
-            legenda = zeraEm?.let { "$it s pra zerar" } ?: "faltam ${tempoRestante(metaMs - olhadoMs)}",
+            legenda = zeraEm?.let { "$it s to reset" } ?: "${tempoRestante(metaMs - olhadoMs)} left",
             alerta = zeraEm != null,
             exigente = metadeVerificada,
             onLeitura = { nova, olho ->
@@ -662,7 +662,7 @@ private fun PedirCamera(onLiberada: () -> Unit) {
             Poder.CAMERA.abrirConfiguracao(ctx)
         }
     }
-    AvisoComBotao("A câmera está sem permissão.\nLibere pra desligar o alarme.", "LIBERAR CÂMERA", fundoClaro = true) {
+    AvisoComBotao("The camera has no permission.\nAllow it to turn off the alarm.", "ALLOW CAMERA", fundoClaro = true) {
         desbloquear(activity) { pedir.launch(Manifest.permission.CAMERA) }
     }
 }
@@ -716,7 +716,7 @@ private val VerdeVez = Color(0xFF2E7D32)
 
 /** O retorno visual de cada leitura da câmera: cor (verde ou vermelho) e mensagem. */
 private fun retorno(leitura: Leitura): Pair<Color, String> = when (leitura) {
-    Leitura.OLHANDO -> Color(0xFF2E7D32) to "Isso! Continua olhando"
-    Leitura.OLHOS_FECHADOS -> VermelhoAviso to "Abre esses olhos!"
-    Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> VermelhoAviso to "Cadê você? Aproxima o rosto"
+    Leitura.OLHANDO -> Color(0xFF2E7D32) to "That's it! Keep looking"
+    Leitura.OLHOS_FECHADOS -> VermelhoAviso to "Open those eyes!"
+    Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> VermelhoAviso to "Where are you? Bring your face closer"
 }

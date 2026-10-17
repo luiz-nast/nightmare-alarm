@@ -44,7 +44,7 @@ class AlarmeTest {
 
     @Test
     fun nomeSemRotuloViraAlarme() {
-        assertEquals("Alarme", Alarme(1, 7, 0, rotulo = " ").nome)
+        assertEquals("Alarm", Alarme(1, 7, 0, rotulo = " ").nome)
         assertEquals("Remédio", Alarme(1, 7, 0, rotulo = "Remédio").nome)
     }
 

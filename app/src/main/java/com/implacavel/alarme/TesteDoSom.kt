@@ -51,7 +51,7 @@ class TesteDoSom : Activity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(TextView(this).apply {
-            text = "Testando o som…"
+            text = "Testing the sound…"
             textSize = 24f
             gravity = Gravity.CENTER
         })

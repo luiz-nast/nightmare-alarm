@@ -408,8 +408,8 @@ class CaminhadaTest {
         val prazo = 240_000L // 4 min depois do começo da etapa
         // No prazo, nada de bipe: a tela mostra quanto falta dele
         assertNull(segundosProBipe(agora = 220_000, ultimoPasso = 0, prazoAte = prazo))
-        assertEquals("Você tem 3:32 pra começar a andar", avisoDoPrazo(agora = 28_000, prazoAte = prazo))
-        assertEquals("Você tem 20 s pra começar a andar", avisoDoPrazo(agora = 220_000, prazoAte = prazo))
+        assertEquals("You have 3:32 to start walking", avisoDoPrazo(agora = 28_000, prazoAte = prazo))
+        assertEquals("You have 20 s to start walking", avisoDoPrazo(agora = 220_000, prazoAte = prazo))
         assertNull(avisoDoPrazo(agora = prazo, prazoAte = prazo))
         // Parado desde antes do fim do prazo: o 1º bipe 10 s depois dele
         assertEquals(prazo + 10_000, primeiroBipeParado(ultimoPasso = 100_000, prazoAte = prazo))
@@ -426,7 +426,7 @@ class CaminhadaTest {
         assertEquals("7:12", tempoAndado(432_999)) // o que já foi: não arredonda pra cima
         assertEquals("0:28", tempoAndado(28_400))
         assertEquals("16:00", tempoAndado(CAMINHADA_MS))
-        assertEquals("1,3 m/s", textoDaVelocidade(1.34f))
-        assertEquals("0,0 m/s", textoDaVelocidade(0f))
+        assertEquals("1.3 m/s", textoDaVelocidade(1.34f))
+        assertEquals("0.0 m/s", textoDaVelocidade(0f))
     }
 }

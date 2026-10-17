@@ -7,27 +7,27 @@ import java.time.ZonedDateTime
 import java.util.Locale
 import kotlin.math.roundToInt
 
-/** Ordem dos dias na tela: domingo primeiro, como nos calendários brasileiros. */
+/** Ordem dos dias na tela: domingo primeiro, como nos calendários brasileiros (e americanos). */
 val ORDEM_DIAS = listOf(7, 1, 2, 3, 4, 5, 6)
 
-val NOME_CURTO_DIA = mapOf(1 to "seg", 2 to "ter", 3 to "qua", 4 to "qui", 5 to "sex", 6 to "sáb", 7 to "dom")
+val NOME_CURTO_DIA = mapOf(1 to "Mon", 2 to "Tue", 3 to "Wed", 4 to "Thu", 5 to "Fri", 6 to "Sat", 7 to "Sun")
 
-val LETRA_DIA = mapOf(1 to "S", 2 to "T", 3 to "Q", 4 to "Q", 5 to "S", 6 to "S", 7 to "D")
+val LETRA_DIA = mapOf(1 to "M", 2 to "T", 3 to "W", 4 to "T", 5 to "F", 6 to "S", 7 to "S")
 
 fun hhmm(hora: Int, minuto: Int): String = String.format(Locale.ROOT, "%02d:%02d", hora, minuto)
 
 fun hhmm(hora: LocalTime): String = hhmm(hora.hour, hora.minute)
 
-/** "Uma vez", "Todo dia", "Dias úteis", "Fim de semana" ou a lista, como "dom, qua". */
+/** "Once", "Every day", "Weekdays", "Weekends" ou a lista, como "Sun, Wed". */
 fun resumoDias(dias: Set<Int>): String = when {
-    dias.isEmpty() -> "Uma vez"
-    dias.size == 7 -> "Todo dia"
-    dias == setOf(1, 2, 3, 4, 5) -> "Dias úteis"
-    dias == setOf(6, 7) -> "Fim de semana"
+    dias.isEmpty() -> "Once"
+    dias.size == 7 -> "Every day"
+    dias == setOf(1, 2, 3, 4, 5) -> "Weekdays"
+    dias == setOf(6, 7) -> "Weekends"
     else -> ORDEM_DIAS.filter { it in dias }.joinToString(", ") { NOME_CURTO_DIA.getValue(it) }
 }
 
-/** "em 9 h 12 min", arredondando pra cima até o minuto seguinte. */
+/** "in 9 h 12 min", arredondando pra cima até o minuto seguinte. */
 fun tempoAte(agora: ZonedDateTime, quando: ZonedDateTime): String {
     val minutos = ((Duration.between(agora, quando).seconds + 59) / 60).coerceAtLeast(0)
     val d = minutos / (24 * 60)
@@ -38,7 +38,7 @@ fun tempoAte(agora: ZonedDateTime, quando: ZonedDateTime): String {
         if (h > 0) add("$h h")
         if (m > 0 || isEmpty()) add("$m min")
     }
-    return "em " + partes.joinToString(" ")
+    return "in " + partes.joinToString(" ")
 }
 
 /** Tempo que falta no anel da câmera, arredondando pra cima até o segundo: "19:42" a partir de 1 min, senão "28 s". */

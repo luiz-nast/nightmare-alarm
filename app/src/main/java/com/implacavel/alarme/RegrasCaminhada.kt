@@ -552,9 +552,9 @@ fun primeiroBipeParado(ultimoPasso: Long, prazoAte: Long): Long = maxOf(ultimoPa
 fun segundosProBipe(agora: Long, ultimoPasso: Long, prazoAte: Long): Int? =
     if (agora < prazoAte) null else ceil((primeiroBipeParado(ultimoPasso, prazoAte) - agora) / 1000.0).toInt().coerceAtLeast(0)
 
-/** Aviso na tela durante o prazo pra sair: "Você tem 6:32 pra começar a andar". Null depois dele. */
+/** Aviso na tela durante o prazo pra sair: "You have 6:32 to start walking". Null depois dele. */
 fun avisoDoPrazo(agora: Long, prazoAte: Long): String? =
-    if (agora < prazoAte) "Você tem ${tempoRestante(prazoAte - agora)} pra começar a andar" else null
+    if (agora < prazoAte) "You have ${tempoRestante(prazoAte - agora)} to start walking" else null
 
 /** Tempo já andado, sem arredondar pra cima (é o que já foi): "7:12", "0:28". */
 fun tempoAndado(ms: Long): String {
@@ -562,5 +562,5 @@ fun tempoAndado(ms: Long): String {
     return String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60)
 }
 
-/** Velocidade na tela, com vírgula: "1,3 m/s". */
-fun textoDaVelocidade(metrosPorSegundo: Float): String = String.format(Locale.ROOT, "%.1f m/s", metrosPorSegundo).replace('.', ',')
+/** Velocidade na tela: "1.3 m/s". */
+fun textoDaVelocidade(metrosPorSegundo: Float): String = String.format(Locale.ROOT, "%.1f m/s", metrosPorSegundo)

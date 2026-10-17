@@ -1,5 +1,5 @@
 // GUARDADO, FORA DO APP: os testes do Gemini (reserva/gemini/Gemini.kt). Pra religar, volta pra
-// app/src/test/java/com/implacavel/alarme/ junto com ele (veja o LEIA-ME.md).
+// app/src/test/java/com/implacavel/alarme/ junto com ele (veja o README.md).
 package com.implacavel.alarme
 
 import org.json.JSONObject

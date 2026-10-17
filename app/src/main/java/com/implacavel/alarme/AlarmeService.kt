@@ -1499,9 +1499,9 @@ class AlarmeService : Service() {
             .setContentTitle(alarme.nome)
             .setContentText(
                 when {
-                    !alarme.missao -> "$agora · tocando"
-                    alarme.caminhada -> "$agora · diga STOP: conversa + caminhada"
-                    else -> "$agora · diga STOP e olhe pra câmera"
+                    !alarme.missao -> "$agora · ringing"
+                    alarme.caminhada -> "$agora · say STOP: talk + walk"
+                    else -> "$agora · say STOP and look at the camera"
                 },
             )
             .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -1513,7 +1513,7 @@ class AlarmeService : Service() {
             .setContentIntent(telaCheia)
             .setFullScreenIntent(telaCheia, true)
             .setDeleteIntent(comandoPendente(2, ACAO_REEXIBIR))
-            .addAction(0, "Desligar", desligar)
+            .addAction(0, "Turn off", desligar)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }

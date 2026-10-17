@@ -1,4 +1,4 @@
-// GUARDADO, FORA DO APP (não compila daqui): veja reserva/gemini/LEIA-ME.md pra religar.
+// GUARDADO, FORA DO APP (não compila daqui): veja reserva/gemini/README.md pra religar.
 // A IA da conversa da manhã: o Gemini, do Google, pela internet (REST generateContent). Guarda o histórico da
 // conversa e manda tudo a cada vez (a API não lembra nada). A IA só produz texto: a vez de cada um, quanto
 // dura e o fim são do AlarmeService. A chave vem só do local.properties (BuildConfig.GEMINI_API_KEY) e nunca

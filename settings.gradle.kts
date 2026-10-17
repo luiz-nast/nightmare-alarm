@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AlarmeImplacavel"
+rootProject.name = "NightmareAlarm"
 include(":app")

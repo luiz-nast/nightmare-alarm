@@ -58,7 +58,7 @@ private fun TelaPrincipal() {
     val tocando by AlarmeService.tocando.collectAsStateWithLifecycle()
     val musica by Ajustes.musica.collectAsStateWithLifecycle()
     val volumeDaVoz by Ajustes.volumeDaVozAgora.collectAsStateWithLifecycle()
-    val agora = agoraACada(15_000) // pros textos "toca em 9 h 12 min"
+    val agora = agoraACada(15_000) // pros textos "rings in 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
 
     // Permissões e a IA do celular: relidas toda vez que a tela volta (do diálogo do sistema ou das Configurações)
@@ -91,7 +91,7 @@ private fun TelaPrincipal() {
             ExtendedFloatingActionButton(
                 onClick = { editando = Alarme(id = Alarmes.novoId(), hora = 7, minuto = 0) },
                 icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                text = { Text("Novo alarme") },
+                text = { Text("New alarm") },
             )
         },
     ) { margens ->
@@ -111,7 +111,7 @@ private fun TelaPrincipal() {
                     Button(
                         onClick = { ctx.startActivity(Intent(ctx, AlarmeActivity::class.java)) },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
-                    ) { Text("⏰ ${alarme.nome} tocando · abrir") }
+                    ) { Text("⏰ ${alarme.nome} ringing · open") }
                 }
             }
             item { CartaoPoderes(poderes, liberar) }
@@ -127,7 +127,7 @@ private fun TelaPrincipal() {
                     iaPronta = iaPronta,
                     onTestar = {
                         Agendador.agendarTeste(ctx, 10)
-                        Toast.makeText(ctx, "Toca em 10 segundos. Bloqueie a tela pra ver o efeito completo.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, "Rings in 10 seconds. Lock the screen to see the full effect.", Toast.LENGTH_LONG).show()
                     },
                     onTestarCaminhada = {
                         // Sem a localização, a caminhada não conta: pede no diálogo agora (sem abrir as Configurações;
@@ -137,11 +137,11 @@ private fun TelaPrincipal() {
                         if (semLocalizacao) pedirPermissao.launch(Poder.LOCALIZACAO.pedido)
                         Agendador.agendarTeste(ctx, 10, caminhada = true)
                         val aviso = when {
-                            semLocalizacao -> "Libere a localização no aviso: sem ela, a caminhada não conta."
-                            !comIa -> "A IA do celular não está pronta: vai direto pra caminhada."
-                            else -> "Bloqueie a tela pra ver o efeito completo."
+                            semLocalizacao -> "Allow location in the prompt: without it, the walk does not count."
+                            !comIa -> "The phone AI is not ready: it goes straight to the walk."
+                            else -> "Lock the screen to see the full effect."
                         }
-                        Toast.makeText(ctx, "Toca em 10 segundos. $aviso", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, "Rings in 10 seconds. $aviso", Toast.LENGTH_LONG).show()
                     },
                 )
             }
@@ -157,7 +157,7 @@ private fun TelaPrincipal() {
             if (alarmes.isEmpty()) {
                 item {
                     Text(
-                        "Nenhum alarme ainda. Toque em \"Novo alarme\" pra criar o primeiro.",
+                        "No alarms yet. Tap \"New alarm\" to create the first one.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
@@ -187,5 +187,5 @@ private fun TelaPrincipal() {
 private fun salvarEAgendar(ctx: Context, alarme: Alarme) {
     Alarmes.salvar(alarme)
     val quando = Agendador.agendar(ctx, alarme) ?: return
-    Toast.makeText(ctx, "Alarme ${tempoAte(ZonedDateTime.now(), quando)}", Toast.LENGTH_SHORT).show()
+    Toast.makeText(ctx, "Alarm ${tempoAte(ZonedDateTime.now(), quando)}", Toast.LENGTH_SHORT).show()
 }

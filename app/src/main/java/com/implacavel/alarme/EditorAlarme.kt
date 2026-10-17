@@ -65,18 +65,18 @@ fun EditorAlarme(
                 Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(if (novo) "Novo alarme" else "Editar alarme", style = MaterialTheme.typography.titleLarge)
+                Text(if (novo) "New alarm" else "Edit alarm", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(16.dp))
                 TimePicker(state = relogio)
                 OutlinedTextField(
                     value = rotulo,
                     onValueChange = { rotulo = it.take(40) },
-                    label = { Text("Nome (ex.: Remédio)") },
+                    label = { Text("Name (e.g. Medicine)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(16.dp))
-                Text("Repetir", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
+                Text("Repeat", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 SeletorDias(dias) { dias = it }
                 Text(
@@ -86,20 +86,20 @@ fun EditorAlarme(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                Text("Tipo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
+                Text("Type", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
                 OpcaoTipo(
-                    "Câmera + frases - ${META_OLHAR_MS / 60_000} min",
-                    "A música, dizer STOP e 40 min de câmera de olhos abertos, com 5 frases pra repetir no meio",
+                    "Camera + phrases - ${META_OLHAR_MS / 60_000} min",
+                    "The music, saying STOP and 40 min of camera with your eyes open, with 5 phrases to repeat in the middle",
                     tipo == TipoDeAlarme.ATIVIDADE,
                 ) { tipo = TipoDeAlarme.ATIVIDADE }
                 OpcaoTipo(
-                    "Conversa + caminhada - ${(CONVERSA_MS + PRAZO_SAIR_MS + CAMINHADA_MS) / 60_000} min",
-                    "A música, dizer STOP, 10 min de conversa com a IA, 4 min pra sair e 16 min andando na rua, chova ou faça sol",
+                    "Talk + walk - ${(CONVERSA_MS + PRAZO_SAIR_MS + CAMINHADA_MS) / 60_000} min",
+                    "The music, saying STOP, 10 min of talk with the AI, 4 min to go out and 16 min of walking outside, rain or shine",
                     tipo == TipoDeAlarme.CONVERSA_E_CAMINHADA,
                 ) { tipo = TipoDeAlarme.CONVERSA_E_CAMINHADA }
                 OpcaoTipo(
-                    "Lembrete de remédio",
-                    "Toque suave, de 15% a 75% do volume em 2 min, e um botão DESLIGAR",
+                    "Medicine reminder",
+                    "A gentle tone, from 15% to 75% volume in 2 min, and a TURN OFF button",
                     tipo == TipoDeAlarme.REMEDIO,
                 ) { tipo = TipoDeAlarme.REMEDIO }
                 Spacer(Modifier.height(12.dp))
@@ -108,10 +108,10 @@ fun EditorAlarme(
                         TextButton(
                             onClick = onExcluir,
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                        ) { Text("Excluir") }
+                        ) { Text("Delete") }
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onCancelar) { Text("Cancelar") }
+                    TextButton(onClick = onCancelar) { Text("Cancel") }
                     Button(
                         onClick = {
                             val alarme = inicial.copy(
@@ -126,7 +126,7 @@ fun EditorAlarme(
                             )
                             onSalvar(alarme)
                         },
-                    ) { Text("Salvar") }
+                    ) { Text("Save") }
                 }
             }
         }
