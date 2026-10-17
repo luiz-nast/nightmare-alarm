@@ -311,9 +311,17 @@ class DetectorDePassos {
 /**
  * O caminho filtrado, em metros a leste e ao norte do primeiro fixo ([origem]): o que a tela desenha. Como o filtro
  * do Uber, o fixo cru é só uma pista: andando, o ponto segue a velocidade e o rumo
- * do GPS e é puxado devagar ([GANHO]) pro fixo; parado ([fixo] com parado = true), congela (o GPS parado escorrega
- * dizendo ±1 m). Fixo longe demais ([portao]) é um salto do GPS e não conta; [FORA_PRA_ALCANCAR] seguidos e o ponto
- * vai atrás, com mais força, até alcançar; parado, ou se nem assim alcança, pula pra lá (sem travar nunca).
+ * do GPS e é puxado ([GANHO]) pro fixo; parado ([fixo] com parado = true), congela (o GPS parado escorrega
+ * dizendo ±1 m). Fixo longe demais ([portao]) é um salto do GPS e não conta; [FORA_PRA_ALCANCAR] seguidos e o portão
+ * abre ([PORTAO_ALCANCANDO_M]) pro ponto ir atrás até alcançar; parado, ou se nem assim alcança, pula pra lá (sem
+ * travar nunca).
+ *
+ * O ganho era 0,15: nas voltas em volta da piscina (8 × 11 m, 10-17), o Doppler do S24 FE mede 10% a menos do que a
+ * posição anda e erra o rumo em 13 a 20°, e o puxão fraco levava ~6 s pra corrigir: as voltas saíam 11 a 17% menores,
+ * com os cantos virando arcos ("círculos diferentes", disse o dono) e o centro passeando 3,2 a 4,7 m de uma volta pra
+ * outra (o cru: 2,2 m). Com 0,3, a variação entre voltas volta à do cru (0,63 m de raio), o encolhimento cai pela
+ * metade e o traço segue 35% mais liso que o cru. O resto é o GPS: ±2 m numa piscina de 8 m, a posição inteira
+ * escorregando devagar; o retângulo de verdade não sai só do GPS.
  */
 class Trilho {
     var origem: Fixo? = null
@@ -346,9 +354,8 @@ class Trilho {
         if (longe <= portao(atual)) {
             foraSeguidos = 0
             if (!parado) {
-                val ganho = if (alcancando) GANHO_ALCANCANDO else GANHO
-                pl += ganho * rl
-                pn += ganho * rn
+                pl += GANHO * rl
+                pn += GANHO * rn
                 if (alcancando && longe <= portaoNormal(atual)) alcancando = false
             }
         } else if (++foraSeguidos >= FORA_PRA_ALCANCAR) {
@@ -369,8 +376,7 @@ class Trilho {
     private fun portao(atual: Fixo) = if (alcancando) maxOf(PORTAO_ALCANCANDO_M, portaoNormal(atual)) else portaoNormal(atual)
 
     private companion object {
-        const val GANHO = 0.15
-        const val GANHO_ALCANCANDO = 0.3
+        const val GANHO = 0.3
         const val PORTAO_MIN_M = 15.0
         const val PORTAO_FATOR = 3.0
         const val PRECISAO_DO_PORTAO_MIN = 4f
