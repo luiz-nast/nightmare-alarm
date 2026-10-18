@@ -50,12 +50,17 @@ class TesteDaEscuta : Activity() {
             setTurnScreenOn(true)
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // O fundo da janela do app é escuro (Tema.kt, a Noite): texto branco, senão preto no preto
         texto = TextView(this).apply {
             textSize = 22f
             gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
             setPadding(48, 96, 48, 96)
         }
-        setContentView(ScrollView(this).apply { addView(texto) })
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(0xFF0D0A14.toInt())
+            addView(texto)
+        })
         if (savedInstanceState != null || emTeste) return finish()
         if (Build.VERSION.SDK_INT < 33 || Ajustes.emAndamento != null || !Poder.MICROFONE.liberado(this)) {
             Log.w(TAG, "Escuta teste: não roda (Android 13+, sem alarme tocando e com o microfone liberado)")

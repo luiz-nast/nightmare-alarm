@@ -54,6 +54,7 @@ class TesteDoSom : Activity() {
             text = "Testing the sound…"
             textSize = 24f
             gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE) // o fundo da janela é escuro (Tema.kt)
         })
         // Um teste por vez (a tela acendendo pode recriar a Activity: a cópia nova só fecha)
         if (savedInstanceState != null || emTeste) return finish()
