@@ -57,9 +57,10 @@ object Noticias {
 
 /**
  * GET em [endereco] (na thread de fundo), com [ESPERA_BUSCA_MS] pra conectar e pra ler: o corpo da resposta
- * (até [TEXTO_MAX_LETRAS]), ou null se deu erro ou veio código diferente de 2xx.
+ * (até [TEXTO_MAX_LETRAS]), ou null se deu erro ou veio código diferente de 2xx. [agente] é o User-Agent, pros sites
+ * que exigem um (a Wikipédia).
  */
-fun baixarTexto(endereco: String): String? {
+fun baixarTexto(endereco: String, agente: String? = null): String? {
     val conexao = try {
         URL(endereco).openConnection() as HttpURLConnection
     } catch (e: Exception) {
@@ -69,6 +70,7 @@ fun baixarTexto(endereco: String): String? {
     return try {
         conexao.connectTimeout = ESPERA_BUSCA_MS
         conexao.readTimeout = ESPERA_BUSCA_MS
+        agente?.let { conexao.setRequestProperty("User-Agent", it) }
         val codigo = conexao.responseCode
         if (codigo !in 200..299) {
             Log.w(TAG, "Busca: ${conexao.url.host} respondeu $codigo")

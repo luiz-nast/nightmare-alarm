@@ -24,6 +24,7 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import java.io.File
+import java.time.LocalDate
 import java.util.concurrent.Executors
 
 /** O modelo: o arquivo do Hugging Face (litert-community/gemma-4-E2B-it-litert-lm), com o tamanho exato dele. */
@@ -34,20 +35,32 @@ const val TAMANHO_DO_MODELO = 2_588_147_712L
 private const val MEMORIA_MINIMA = 1_500L * 1024 * 1024
 
 /**
- * Quanto de conversa (instrução, falas e respostas, em tokens) cabe: a instrução (~750) e umas 30 trocas de ~100
- * tokens, os 10 min de conversa pura e quase todo o extra. Medido no S24 FE: com 6144 ou 8192, ler a instrução e
- * responder fica ~40% mais lento (a primeira fala demora o dobro), sem mudar a memória. Se encher, a IA para de
- * responder e a conversa acaba uns minutos antes (a caminhada vem igual).
+ * Quanto de conversa (instrução, falas e respostas, em tokens) cabe: a instrução (~1000, com as anotações e o que o
+ * dono contou de si) e umas 25 trocas de ~100 tokens (uma busca gasta uns 250), os 10 min de conversa pura e quase
+ * todo o extra. Medido no S24 FE: com 6144 ou 8192, ler a instrução e responder fica ~40% mais lento (a primeira fala
+ * demora o dobro), sem mudar a memória. Se encher, a IA para de responder e a conversa acaba uns minutos antes (a
+ * caminhada vem igual).
  */
 const val CONTEXTO_TOKENS = 4096
 
-/** Tamanho máximo de uma resposta, em tokens: cada fala é uma pergunta de até 15 palavras (uns 20 tokens), com folga pra uma manchete. */
-const val RESPOSTA_MAX_TOKENS = 48
+/**
+ * Tamanho máximo de uma resposta, em tokens: duas a quatro frases curtas, 40 palavras (uns 60 tokens), com folga; passou,
+ * [ateAUltimaFrase] tira a frase pela metade. No S24 FE o modelo escreve uns 17 a 19 tokens por segundo: uma fala cheia
+ * leva uns 4 s pra nascer (e uns 15 s pra voz dizer). O dono prefere isso a perguntas curtas de script.
+ */
+const val RESPOSTA_MAX_TOKENS = 84
+
+/** A amostragem do Gemma 4 (a recomendada pelo Google, com a temperatura um pouco abaixo de 1: varia as falas sem perder o fio). */
+private val AMOSTRAGEM = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.9)
+
+/** Quem anota é mais certinho: temperatura baixa. */
+private val AMOSTRAGEM_DAS_ANOTACOES = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.3)
 
 /**
  * Uma conversa com o Gemma no celular ([MotorDaConversa]): a [instrucao] do treinador vira a instrução do
  * sistema, a [abertura] é o primeiro pedido, e o histórico fica no próprio modelo (não precisa mandar tudo de novo). Se a IA sugerir descansar ou
- * disser que o alarme acabou ([respostaSegura]), vem o [falaNaoNegocia] no lugar.
+ * disser que o alarme acabou ([respostaSegura]), vem o [falaNaoNegocia] no lugar. Se ela pedir uma busca
+ * ([consultaDaBusca]), a [troca] busca ([Pesquisa]) e manda o resultado antes de devolver a fala.
  *
  * Um pedido cancelado não para o modelo: ele termina de escrever e a resposta é jogada fora. Parar no meio
  * (`cancelProcess`) estraga a conversa pra sempre: medido no S24 FE (`TesteDaIa --ez cancelar true`), todo pedido
@@ -130,7 +143,61 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
         }
 
         /** O texto de uma resposta do modelo: as partes de texto juntas. */
-        private fun textoDe(resposta: Message): String = resposta.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
+        internal fun textoDe(resposta: Message): String = resposta.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
+
+        /** A conversa da manhã, com a [instrucao] como instrução do sistema (o modelo já lê a instrução ao criar). Só na thread do modelo. */
+        internal fun conversaDaManha(engine: Engine, instrucao: String): Conversation = engine.createConversation(
+            ConversationConfig(
+                systemInstruction = Contents.of(instrucao),
+                samplerConfig = AMOSTRAGEM,
+                prefillPrefaceOnInit = true,
+                maxOutputToken = RESPOSTA_MAX_TOKENS,
+                thinkingConfig = ThinkingConfig(enableThinking = false),
+            ),
+        )
+
+        /** O que uma troca com o modelo devolveu: a [fala] final e, se a IA pediu uma busca no meio, o que ela [buscou]. */
+        internal class Troca(val fala: String, val buscou: String?)
+
+        /**
+         * Uma troca com o modelo na [conversa] (só na thread do modelo): manda a [mensagem] e, se a IA responder
+         * pedindo uma busca ([consultaDaBusca]), busca ([Pesquisa], avisando [aoProcurar]) e manda o resultado
+         * ([pedidoComResultado]), até a fala de verdade. Sem [podeBuscar] (já buscou demais nesta conversa), ela
+         * responde com o que sabe ([PEDIDO_SEM_BUSCA]); um segundo pedido de busca seguido também. Nunca para no meio:
+         * a linha "SEARCH:" fica na memória da IA, e ela precisa ver a resposta pra conversa seguir fazendo sentido.
+         */
+        internal fun trocar(conversa: Conversation, mensagem: String, podeBuscar: Boolean, aoProcurar: (String) -> Unit): Troca {
+            var texto = textoDe(conversa.sendMessage(mensagem))
+            val consulta = consultaDaBusca(texto) ?: return Troca(texto, null)
+            val pedido = if (podeBuscar) {
+                aoProcurar(consulta)
+                val resultado = Pesquisa.buscar(consulta)
+                Log.i(TAG, "IA do celular: pediu busca (\"${consulta.take(60)}\"): ${resultado?.length ?: 0} letras de resultado")
+                pedidoComResultado(consulta, resultado, pergunta = mensagem)
+            } else {
+                Log.i(TAG, "IA do celular: pediu busca demais, responde sem")
+                PEDIDO_SEM_BUSCA
+            }
+            texto = textoDe(conversa.sendMessage(pedido))
+            if (consultaDaBusca(texto) != null) texto = textoDe(conversa.sendMessage(PEDIDO_SEM_BUSCA))
+            return Troca(texto, consulta)
+        }
+
+        /**
+         * As anotações sobre a pessoa, numa conversa à parte com o modelo [engine] (só na thread do modelo), com um teto
+         * de tokens maior que o das falas ([ANOTACOES_MAX_TOKENS]): as [antigas], a [transcricao] de hoje e a data de
+         * [hoje] vão em [pedidoDeAnotacoes]; volta limpo e com as antigas que o modelo deixou cair ([juntarAnotacoes]).
+         */
+        internal fun anotarCom(engine: Engine, antigas: String, transcricao: List<Turno>, hoje: LocalDate): String =
+            engine.createConversation(
+                ConversationConfig(
+                    systemInstruction = Contents.of(INSTRUCAO_DAS_ANOTACOES),
+                    samplerConfig = AMOSTRAGEM_DAS_ANOTACOES,
+                    prefillPrefaceOnInit = true,
+                    maxOutputToken = ANOTACOES_MAX_TOKENS,
+                    thinkingConfig = ThinkingConfig(enableThinking = false),
+                ),
+            ).use { c -> juntarAnotacoes(antigas, textoDe(c.sendMessage(pedidoDeAnotacoes(antigas, transcricao, hoje)))) }
     }
 
     private val app = ctx.applicationContext
@@ -141,6 +208,17 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
     @Volatile private var respondido = -1 // o último pedido que o modelo terminou de responder (thread do modelo)
     private var entregue = -1 // o último pedido cuja resposta chegou no serviço (thread principal)
     @Volatile private var desligado = false
+    private var buscas = 0 // buscas feitas nesta conversa (thread do modelo), até [BUSCAS_MAX]
+
+    override var aoProcurar: ((String) -> Unit)? = null
+
+    /**
+     * Lê a instrução já (uns 9 s no S24 FE, com as anotações e as manchetes: ~1200 tokens), ainda durante a música, pra
+     * abertura sair em uns 3 s no fim do bom dia. Pode chamar de novo: não lê duas vezes.
+     */
+    override fun aquecer() {
+        trabalho.execute { if (!desligado) runCatching { conversaPronta() }.onFailure { Log.w(TAG, "IA do celular: não leu a instrução antes (${it.javaClass.simpleName})") } }
+    }
 
     override fun abrir(aoResponder: (String?) -> Unit) = perguntar(abertura, aoResponder)
 
@@ -172,6 +250,26 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
         }
     }
 
+    /**
+     * As anotações pra manhã seguinte, depois do que estiver em curso na thread do modelo (uma resposta jogada fora
+     * termina de escrever antes). A conversa da manhã fecha antes de anotar: as duas não ficam na memória juntas.
+     */
+    override fun anotar(antigas: String, transcricao: List<Turno>, aoTerminar: (String?) -> Unit) {
+        if (desligado) return aoTerminar(null)
+        desligado = true
+        cancelar()
+        trabalho.execute {
+            val inicio = SystemClock.elapsedRealtime()
+            conversa?.let { runCatching { it.close() } }
+            conversa = null
+            val novas = runCatching { anotarCom(carregado(app), antigas, transcricao, LocalDate.now()) }
+                .onFailure { Log.w(TAG, "IA do celular: não anotou (${it.javaClass.simpleName}: ${it.message?.take(120)})") }
+                .getOrNull()
+            if (novas != null) Log.i(TAG, "IA do celular: anotações da conversa (${novas.lines().size} linhas) em ${SystemClock.elapsedRealtime() - inicio} ms")
+            handler.post { aoTerminar(novas) }
+        }
+    }
+
     private fun perguntar(fala: String, aoResponder: (String?) -> Unit) {
         if (desligado) return
         cancelar() // um pedido por vez
@@ -185,7 +283,11 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
                 if (numero != pedidos || desligado) return@execute // cancelado enquanto carregava ou lia a instrução
                 val mensagem = naoOuvida?.let { pedidoDepoisDeInterrompida(it, fala) } ?: fala
                 naoOuvida = null
-                textoDe(c.sendMessage(mensagem)).also {
+                val troca = trocar(c, mensagem, podeBuscar = buscas < BUSCAS_MAX) { consulta ->
+                    buscas++
+                    handler.post { if (numero == pedidos && !desligado) aoProcurar?.invoke(consulta) }
+                }
+                troca.fala.also {
                     respondido = numero
                     if (numero != pedidos) naoOuvida = fala // cancelado enquanto escrevia
                 }
@@ -198,15 +300,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
     }
 
     /** A conversa com a instrução do treinador, criada no primeiro pedido (já lendo a instrução). Só na thread do modelo. */
-    private fun conversaPronta(): Conversation = conversa ?: carregado(app).createConversation(
-        ConversationConfig(
-            systemInstruction = Contents.of(instrucao),
-            samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8),
-            prefillPrefaceOnInit = true,
-            maxOutputToken = RESPOSTA_MAX_TOKENS,
-            thinkingConfig = ThinkingConfig(enableThinking = false),
-        ),
-    ).also { conversa = it }
+    private fun conversaPronta(): Conversation = conversa ?: conversaDaManha(carregado(app), instrucao).also { conversa = it }
 
     private fun entregar(numero: Int, resposta: String?, demora: Long, aoResponder: (String?) -> Unit) {
         if (numero != pedidos || desligado) return // cancelado, ou já tem um pedido mais novo

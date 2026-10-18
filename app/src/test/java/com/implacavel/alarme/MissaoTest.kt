@@ -66,9 +66,17 @@ class MissaoTest {
     }
 
     @Test
-    fun alarmePede40MinutosETeste30Segundos() {
+    fun cameraPedeOsMinutosDosAjustesETeste30Segundos() {
+        // De começo, 20 min fáceis + 20 exigentes, com a verificação aos 20
         assertEquals(40 * 60_000L, metaOlhar(Alarme(1, 7, 0)))
-        assertEquals(30_000L, metaOlhar(Alarme.teste()))
+        assertEquals(20 * 60_000L, verificacaoEm(Alarme(1, 7, 0)))
+        // O dono mexeu: 5 fáceis + 30 exigentes
+        val tempos = Tempos(cameraFacilMin = 5, cameraDificilMin = 30)
+        assertEquals(35 * 60_000L, metaOlhar(Alarme(1, 7, 0), tempos))
+        assertEquals(5 * 60_000L, verificacaoEm(Alarme(1, 7, 0), tempos))
+        // O teste não segue os ajustes: 30 s, metade fácil, metade exigente
+        assertEquals(30_000L, metaOlhar(Alarme.teste(), tempos))
+        assertEquals(15_000L, verificacaoEm(Alarme.teste(), tempos))
     }
 
     @Test
@@ -127,6 +135,9 @@ class MissaoTest {
         assertNull(marcoCompletado(19 * 60_000L + 59_000, 20 * 60_000L, meta)) // na metade vem a verificação
         assertNull(marcoCompletado(39 * 60_000L + 59_000, 40 * 60_000L, meta)) // nos 40 o alarme já desliga
         assertNull(marcoCompletado(29_000, 30_000, 30_000)) // teste: nenhum aviso
+        // Com a verificação aos 10 min (ajustes), os 10 não avisam e os 20 avisam
+        assertNull(marcoCompletado(9 * 60_000L + 59_000, 10 * 60_000L, 35 * 60_000L, verificacaoMs = 10 * 60_000L))
+        assertEquals(20, marcoCompletado(19 * 60_000L + 59_000, 20 * 60_000L, 35 * 60_000L, verificacaoMs = 10 * 60_000L))
         assertEquals("20 minutes passed.", falaDosMinutos(20))
     }
 
@@ -153,12 +164,43 @@ class MissaoTest {
     }
 
     @Test
-    fun cincoFrasesDiferentesPorDia() {
+    fun frasesDiferentesPorDiaQuantasODonoPediu() {
         val hoje = frasesDoDia(LocalDate.of(2026, 10, 11))
-        assertEquals(FRASES_POR_VERIFICACAO, hoje.toSet().size)
+        assertEquals(5, hoje.toSet().size) // de começo, 5
         assertEquals(hoje, frasesDoDia(LocalDate.of(2026, 10, 11))) // as mesmas no mesmo dia
         assertTrue(hoje != frasesDoDia(LocalDate.of(2026, 10, 12)))
+        assertEquals(10, frasesDoDia(LocalDate.of(2026, 10, 11), quantas = 10).toSet().size)
+        assertTrue(frasesDoDia(LocalDate.of(2026, 10, 11), quantas = 0).isEmpty()) // zero: sem verificação
+        assertEquals(hoje, frasesDoDia(LocalDate.of(2026, 10, 11), quantas = 10).take(5)) // o mesmo sorteio, só mais frases
         // Curtas, mas não tanto quanto "I want to be rich"
         assertTrue(FRASES_MOTIVACIONAIS.all { it.split(" ").size in 6..12 })
+    }
+
+    @Test
+    fun fasesDosBotoesDoTeste() {
+        // Conversa + caminhada: conversa › prazo › caminhada
+        assertEquals(FaseDoTeste.CONVERSA, faseDoTeste(conversa = true, caminhada = false, noPrazo = false, verificacao = false, metadeVerificada = false, naCamera = false))
+        assertEquals(FaseDoTeste.PREPARO, faseDoTeste(conversa = false, caminhada = true, noPrazo = true, verificacao = false, metadeVerificada = false, naCamera = false))
+        assertEquals(FaseDoTeste.CAMINHADA, faseDoTeste(conversa = false, caminhada = true, noPrazo = false, verificacao = false, metadeVerificada = false, naCamera = false))
+        // Câmera + frases: câmera fácil › frases › câmera exigente
+        assertEquals(FaseDoTeste.CAMERA_FACIL, faseDoTeste(conversa = false, caminhada = false, noPrazo = false, verificacao = false, metadeVerificada = false, naCamera = true))
+        assertEquals(FaseDoTeste.FRASES, faseDoTeste(conversa = false, caminhada = false, noPrazo = false, verificacao = true, metadeVerificada = false, naCamera = true))
+        assertEquals(FaseDoTeste.CAMERA_EXIGENTE, faseDoTeste(conversa = false, caminhada = false, noPrazo = false, verificacao = false, metadeVerificada = true, naCamera = true))
+        // Entre uma etapa e outra (a música, o bom dia, a espera da IA): nenhuma
+        assertNull(faseDoTeste(conversa = false, caminhada = false, noPrazo = false, verificacao = false, metadeVerificada = false, naCamera = false))
+        // Voltar e avançar, nas pontas não
+        assertNull(FaseDoTeste.CONVERSA.anterior())
+        assertEquals(FaseDoTeste.PREPARO, FaseDoTeste.CONVERSA.proxima())
+        assertEquals(FaseDoTeste.PREPARO, FaseDoTeste.CAMINHADA.anterior())
+        assertNull(FaseDoTeste.CAMINHADA.proxima())
+        assertEquals(FaseDoTeste.FRASES, FaseDoTeste.CAMERA_EXIGENTE.anterior())
+        assertNull(FaseDoTeste.CAMERA_EXIGENTE.proxima())
+        assertEquals(FASES_DA_CAMERA, FaseDoTeste.FRASES.fases())
+        assertEquals(FASES_DA_CAMINHADA, FaseDoTeste.PREPARO.fases())
+        // Sem frases nos ajustes, a câmera vai da fácil direto pra exigente
+        assertEquals(listOf(FaseDoTeste.CAMERA_FACIL, FaseDoTeste.CAMERA_EXIGENTE), FaseDoTeste.CAMERA_FACIL.fases(comFrases = false))
+        assertEquals(FaseDoTeste.CAMERA_EXIGENTE, FaseDoTeste.CAMERA_FACIL.proxima(comFrases = false))
+        assertEquals(FaseDoTeste.CAMERA_FACIL, FaseDoTeste.CAMERA_EXIGENTE.anterior(comFrases = false))
+        assertEquals(FASES_DA_CAMINHADA, FaseDoTeste.CONVERSA.fases(comFrases = false))
     }
 }

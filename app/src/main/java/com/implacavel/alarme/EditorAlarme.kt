@@ -65,6 +65,7 @@ fun EditorAlarme(
     var som by remember { mutableStateOf(inicial.som) }
     val sons by Sons.lista.collectAsStateWithLifecycle()
     val padrao by Sons.padrao.collectAsStateWithLifecycle()
+    val tempos by Ajustes.tempos.collectAsStateWithLifecycle()
     val adicionarSom = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val novoSom = Sons.adicionar(ctx, uri)
@@ -103,14 +104,20 @@ fun EditorAlarme(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text("Type", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
+                // Os tempos são os dos ajustes (página "More" › Settings), iguais pra todos os alarmes
                 OpcaoTipo(
-                    "Camera + phrases - ${META_OLHAR_MS / 60_000} min",
-                    "The music, saying STOP and 40 min of camera with your eyes open, with 5 phrases to repeat in the middle",
+                    "Camera + phrases - ${tempos.cameraMin} min",
+                    "The music, saying STOP and ${tempos.cameraMin} min of camera with your eyes open" +
+                        when (tempos.frases) {
+                            0 -> ""
+                            1 -> ", with 1 phrase to repeat after ${tempos.cameraFacilMin} min"
+                            else -> ", with ${tempos.frases} phrases to repeat after ${tempos.cameraFacilMin} min"
+                        },
                     tipo == TipoDeAlarme.ATIVIDADE,
                 ) { tipo = TipoDeAlarme.ATIVIDADE }
                 OpcaoTipo(
-                    "Talk + walk - ${(CONVERSA_MS + PRAZO_SAIR_MS + CAMINHADA_MS) / 60_000} min",
-                    "The music, saying STOP, 10 min of talk with the AI, 4 min to go out and 16 min of walking outside, rain or shine",
+                    "Talk + walk - ${tempos.manhaMin} min",
+                    "The music, saying STOP, ${tempos.conversaMin} min of talk with the AI, ${tempos.prepararMin} min to go out and ${tempos.caminhadaMin} min of walking outside, rain or shine",
                     tipo == TipoDeAlarme.CONVERSA_E_CAMINHADA,
                 ) { tipo = TipoDeAlarme.CONVERSA_E_CAMINHADA }
                 OpcaoTipo(

@@ -38,7 +38,7 @@ class AlarmeReceiver : BroadcastReceiver() {
         val volume = Ajustes.volumeParaDevolver ?: ctx.getSystemService(AudioManager::class.java).getStreamVolume(AudioManager.STREAM_ALARM)
         val agora = System.currentTimeMillis()
         val musica = Sons.uriDoAlarme(alarme)
-        Ajustes.emAndamento = Ajustes.emAndamento?.juntar(alarme, agora, musica) ?: EmAndamento(alarme, agora, musica, volume)
+        Ajustes.emAndamento = Ajustes.emAndamento?.juntar(alarme, agora, musica) ?: EmAndamento(alarme, agora, musica, volume, Ajustes.tempos.value)
         Agendador.agendarRetomada(ctx)
         AlarmeService.tocar(ctx)
     }

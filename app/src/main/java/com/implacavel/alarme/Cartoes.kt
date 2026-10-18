@@ -1,4 +1,4 @@
-// Blocos da tela principal: cabeçalho, permissões, testes e ajustes (que abrem e fecham), cartão da música e cartão de cada alarme.
+// Blocos da tela principal: cabeçalho, permissões, sons, testes, ajustes e a IA (que abrem e fecham) e o cartão de cada alarme.
 package com.implacavel.alarme
 
 import android.os.Build
@@ -16,13 +16,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -131,16 +134,22 @@ fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
 
 /**
  * Os botões de teste (tocam em 10 s, com cada etapa bem mais curta), recolhidos: os dois despertadores, "câmera +
- * frases" e "conversa + caminhada", e se a IA do celular está pronta ([iaPronta]: o modelo copiado pro celular e
- * memória livre).
+ * frases" (com as [frases] dos ajustes) e "conversa + caminhada", e se a IA do celular está pronta ([iaPronta]: o
+ * modelo copiado pro celular e memória livre).
  */
 @Composable
-fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -> Unit) {
+fun SecaoTestes(iaPronta: Boolean, frases: Int, onTestar: () -> Unit, onTestarCaminhada: () -> Unit) {
     SecaoRecolhivel("Tests", "Ring in 10 s, to check the alarm", alerta = false) {
         OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Test camera + phrases") }
         OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Test talk + walk") }
+        val meio = when (frases) {
+            0 -> "no phrases (as set)"
+            1 -> "1 phrase in the middle"
+            else -> "$frases phrases in the middle"
+        }
         Text(
-            "Camera + phrases: 30 s of camera, with the phrases in the middle. Talk + walk: 3 min of talk, 30 s to go out and 3 min of walking. Test beeps are quiet.",
+            "Camera + phrases: 30 s of camera, $meio. Talk + walk: 3 min of talk, 30 s to go out and 3 min of walking. Test beeps are quiet, at the default volume. " +
+                "On the test screen, Back, Cancel test and Next move between the phases.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )
@@ -154,28 +163,146 @@ fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -
 
 /**
  * Os ajustes, recolhidos: o volume da voz do app (o bom dia, as frases e a IA), de 10% a 100% do volume de alarme, de
- * 5 em 5 ([volumeDaVoz]; de começo, [VOLUME_DA_VOZ]). Vale da próxima fala em diante, até no alarme tocando.
+ * 5 em 5 ([volumeDaVoz]; de começo, [VOLUME_DA_VOZ]; vale da próxima fala em diante, até no alarme tocando); e os
+ * [tempos] dos despertadores ([Tempos]): o começo e o fim da subida da música (um controle de duas pontas), a câmera
+ * fácil, as frases e a câmera exigente do "câmera + frases", e a conversa, o prazo pra sair e a caminhada do
+ * "conversa + caminhada". Cada um vale do próximo alarme em diante.
  */
 @Composable
-fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit) {
+fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit, tempos: Tempos, onTempos: (Tempos) -> Unit) {
     var arrastando by remember(volumeDaVoz) { mutableFloatStateOf(volumeDaVoz) }
-    SecaoRecolhivel("Settings", "App voice: ${porcento(volumeDaVoz)}%", alerta = false) {
-        Text(
-            "Voice volume: ${porcento(arrastando)}%",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 8.dp),
-        )
+    var faixa by remember(tempos.volumeInicio, tempos.volumeFim) { mutableStateOf(tempos.volumeInicio..tempos.volumeFim) }
+    val resumo = "Voice ${porcento(volumeDaVoz)}% · music ${porcento(tempos.volumeInicio)}–${porcento(tempos.volumeFim)}% · " +
+        "camera ${tempos.cameraMin} min · talk + walk ${tempos.manhaMin} min"
+    SecaoRecolhivel("Settings", resumo, alerta = false) {
+        TituloDoAjuste("Voice volume: ${porcento(arrastando)}%")
         Slider(
             value = arrastando,
             onValueChange = { arrastando = it },
             onValueChangeFinished = { onVolumeDaVoz(arrastando) },
             valueRange = VOLUME_DA_VOZ_MIN..1f,
-            steps = ((1f - VOLUME_DA_VOZ_MIN) / 0.05f).roundToInt() - 1,
+            steps = ((1f - VOLUME_DA_VOZ_MIN) / PASSO_DO_VOLUME).roundToInt() - 1,
         )
+        Text("The good morning, the phrases and the AI. The beeps and the notices do not change.", style = MaterialTheme.typography.bodySmall)
+
+        TituloDoAjuste("Music volume: ${porcento(faixa.start)}% rising to ${porcento(faixa.endInclusive)}%")
+        RangeSlider(
+            value = faixa,
+            onValueChange = { faixa = it },
+            onValueChangeFinished = { onTempos(tempos.copy(volumeInicio = passoDoVolume(faixa.start), volumeFim = passoDoVolume(faixa.endInclusive))) },
+            valueRange = VOLUME_DA_MUSICA,
+            steps = ((VOLUME_DA_MUSICA.endInclusive - VOLUME_DA_MUSICA.start) / PASSO_DO_VOLUME).roundToInt() - 1,
+        )
+        Text("The alarm music starts at the first value and rises to the second in 30 s (the phone's alarm volume). The medicine reminder has its own.", style = MaterialTheme.typography.bodySmall)
+
+        SubtituloDoAjuste("Camera + phrases")
+        AjusteDeMinutos("Easy camera (eyes open above 40%)", tempos.cameraFacilMin, MINUTOS_DA_CAMERA) { onTempos(tempos.copy(cameraFacilMin = it)) }
+        AjusteDeInteiro("Phrases to repeat after it", tempos.frases, FRASES_DA_VERIFICACAO, if (tempos.frases == 1) "phrase" else "phrases") { onTempos(tempos.copy(frases = it)) }
+        AjusteDeMinutos("Strict camera (eyes open above 55%)", tempos.cameraDificilMin, MINUTOS_DA_CAMERA) { onTempos(tempos.copy(cameraDificilMin = it)) }
+
+        SubtituloDoAjuste("Talk + walk")
+        AjusteDeMinutos("Talk with the AI", tempos.conversaMin, MINUTOS_DA_CONVERSA) { onTempos(tempos.copy(conversaMin = it)) }
+        AjusteDeMinutos("Time to get ready and go out (with the waves)", tempos.prepararMin, MINUTOS_PRA_SAIR) { onTempos(tempos.copy(prepararMin = it)) }
+        AjusteDeMinutos("Walking outside", tempos.caminhadaMin, MINUTOS_DA_CAMINHADA) { onTempos(tempos.copy(caminhadaMin = it)) }
         Text(
-            "The good morning, the phrases and the AI. The music, the beeps and the notices do not change.",
+            "Each change applies from the next alarm on: an alarm that is already ringing keeps the times it rang with. Tests keep their own short times (30 s of camera; 3 min of talk, 30 s to go out, 3 min of walking) and the default 10% → 40% music volume.",
             style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+}
+
+/** O volume no passo de 5% mais perto (o controle anda contínuo). */
+private fun passoDoVolume(valor: Float): Float = (valor / PASSO_DO_VOLUME).roundToInt() * PASSO_DO_VOLUME
+
+@Composable
+private fun TituloDoAjuste(texto: String) {
+    Text(texto, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+}
+
+@Composable
+private fun SubtituloDoAjuste(texto: String) {
+    Text(texto, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 20.dp))
+}
+
+/** Um ajuste em minutos, de [faixa].first a [faixa].last, de 1 em 1: o título com o valor e o controle. [onMudar] só ao soltar. */
+@Composable
+private fun AjusteDeMinutos(titulo: String, valor: Int, faixa: IntRange, onMudar: (Int) -> Unit) =
+    AjusteDeInteiro(titulo, valor, faixa, "min", onMudar)
+
+@Composable
+private fun AjusteDeInteiro(titulo: String, valor: Int, faixa: IntRange, unidade: String, onMudar: (Int) -> Unit) {
+    var arrastando by remember(valor) { mutableFloatStateOf(valor.toFloat()) }
+    val mostrado = arrastando.roundToInt()
+    Text(
+        "$titulo: ${if (mostrado == 0 && unidade != "min") "none" else "$mostrado $unidade"}",
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 10.dp),
+    )
+    Slider(
+        value = arrastando,
+        onValueChange = { arrastando = it },
+        onValueChangeFinished = { onMudar(arrastando.roundToInt().coerceIn(faixa)) },
+        valueRange = faixa.first.toFloat()..faixa.last.toFloat(),
+        steps = (faixa.last - faixa.first - 1).coerceAtLeast(0),
+    )
+}
+
+/**
+ * A IA da manhã, recolhida: o que o dono conta de si ([sobreMim], gravado enquanto digita, até
+ * [SOBRE_MIM_MAX_LETRAS]) e o que a IA anotou dele nas conversas ([memoria], com o botão de esquecer). Os dois vão
+ * na instrução da IA toda manhã: é o que faz a conversa continuar de onde parou, em vez de recomeçar do zero.
+ */
+@Composable
+fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, onEsquecer: () -> Unit) {
+    var texto by remember(sobreMim) { mutableStateOf(sobreMim) }
+    // Grava um instante depois da última letra, não a cada tecla
+    LaunchedEffect(texto) {
+        if (texto != sobreMim) {
+            delay(800)
+            onSobreMim(texto)
+        }
+    }
+    val linhas = memoria.lines().count { it.isNotBlank() }
+    val resumo = when {
+        sobreMim.isBlank() && linhas == 0 -> "Tell it about you · no notes yet"
+        linhas == 0 -> "Knows what you wrote · no notes yet"
+        else -> "Remembers $linhas ${if (linhas == 1) "thing" else "things"} from your talks"
+    }
+    SecaoRecolhivel("AI companion", resumo, alerta = false) {
+        TituloDoAjuste("About you")
+        Text(
+            "Who you are, what you want to learn, what you like talking about. The AI reads this every morning.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        OutlinedTextField(
+            value = texto,
+            onValueChange = { texto = it.take(SOBRE_MIM_MAX_LETRAS) },
+            placeholder = { Text("I'm Luiz, I work with… I want to learn electronics…") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text("${texto.length}/$SOBRE_MIM_MAX_LETRAS", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp))
+
+        TituloDoAjuste("What the AI remembers")
+        Text(
+            if (memoria.isBlank()) {
+                "Nothing yet. After each talk the AI writes a few lines about what you said, and reads them the next morning."
+            } else {
+                memoria
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        if (memoria.isNotBlank()) {
+            TextButton(onClick = onEsquecer, modifier = Modifier.padding(top = 4.dp)) { Text("Forget everything") }
+        }
+        Text(
+            "Looking things up: when you ask about a fact, the AI may search Wikipedia and the news for a few seconds. The model itself stays on the phone.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 8.dp),
         )
     }
 }
@@ -214,7 +341,7 @@ private fun LinhaDoSom(nome: String, padrao: Boolean, onPadrao: () -> Unit, onRe
 }
 
 @Composable
-fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Unit, onClick: () -> Unit) {
+fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, tempos: Tempos, onLigar: (Boolean) -> Unit, onClick: () -> Unit) {
     val corHorario = if (alarme.ativo) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -230,8 +357,8 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                 Text(
                     when {
                         alarme.remedio -> "reminder: gentle tone"
-                        alarme.caminhada -> "talk + walk: 10 min of AI and 16 min of walking"
-                        else -> "camera + phrases: 40 min of camera"
+                        alarme.caminhada -> "talk + walk: ${tempos.conversaMin} min of AI and ${tempos.caminhadaMin} min of walking"
+                        else -> "camera + phrases: ${tempos.cameraMin} min of camera"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,

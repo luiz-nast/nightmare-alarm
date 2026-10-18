@@ -2,6 +2,7 @@ package com.implacavel.alarme
 
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.UserManager
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -16,12 +17,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -38,6 +41,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -60,6 +64,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -128,7 +133,11 @@ private fun TelaAlarme(alarme: Alarme) {
     val verificacao by AlarmeService.verificacao.collectAsStateWithLifecycle()
     val conversa by AlarmeService.conversa.collectAsStateWithLifecycle()
     val caminhada by AlarmeService.caminhada.collectAsStateWithLifecycle()
-    val metaCamera = metaOlhar(alarme)
+    val metadeVerificada by AlarmeService.metadeVerificada.collectAsStateWithLifecycle()
+    // Os tempos da foto do alarme, não os ajustes de agora: mexer nos ajustes com o alarme tocando não encurta a missão
+    val tempos by AlarmeService.temposDoAlarme.collectAsStateWithLifecycle()
+    val ondasMudas by Ajustes.ondasMudasAgora.collectAsStateWithLifecycle()
+    val metaCamera = metaOlhar(alarme, tempos)
     val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
     val comCaminhada by AlarmeService.comCaminhada.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
@@ -173,11 +182,26 @@ private fun TelaAlarme(alarme: Alarme) {
     val etapaOlhar = alarme.missao && desbloqueado && silenciado && !saudando && !comemorando && verificacao == null && conversa == null && caminhada == null
     LaunchedEffect(etapaOlhar) { if (etapaOlhar) youtube.retomar() else youtube.pausar() }
 
+    // Num alarme de teste, os botões de fase ("Back", "Cancel test", "Forward") no pé das telas depois do bom dia. O
+    // prazo pra sair anda: a tela já recompõe a cada segundo (por [agora]), e o relógio é relido aqui
+    val fase = if (alarme.deTeste && claro && !saudando && !comemorando) {
+        faseDoTeste(
+            conversa = conversa != null, caminhada = caminhada != null,
+            noPrazo = caminhada?.let { SystemClock.elapsedRealtime() < it.prazoAte } == true,
+            verificacao = verificacao != null, metadeVerificada = metadeVerificada, naCamera = !comCaminhada,
+        )
+    } else {
+        null
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(fundo))) {
         val alturaMinima = maxHeight
         val deitado = maxWidth > maxHeight
+        val rodape: (@Composable () -> Unit)? = fase?.let { f ->
+            { BotoesDoTeste(f, comFrases = tempos.frases > 0, corTexto, onIr = { AlarmeService.irPraFase(ctx, it) }, onCancelar = { AlarmeService.cancelarTeste(ctx) }) }
+        }
         val pagina: @Composable (@Composable () -> Unit) -> Unit = { conteudo ->
-            PaginaAlarme(alturaMinima, deitado, rolagem, corTexto, pulso, hhmm(agora.toLocalTime()), alarme.nome, conteudo)
+            PaginaAlarme(alturaMinima, deitado, rolagem, corTexto, pulso, hhmm(agora.toLocalTime()), alarme.nome, rodape, conteudo)
         }
         when {
             comemorando -> pagina { EtapaFim() }
@@ -201,11 +225,14 @@ private fun TelaAlarme(alarme: Alarme) {
                         onAndando = { AlarmeService.andando(ctx, it) },
                         onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
                         onConcluiu = { AlarmeService.missaoCumprida(ctx) },
+                        ondasMudas = ondasMudas,
+                        onOndas = { AlarmeService.ondas(ctx, ligadas = it) },
                     )
                 }
             }
             else -> EtapaOlhar(
                 metaMs = metaCamera,
+                verificacaoMs = verificacaoEm(alarme, tempos),
                 onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
                 youtube = youtube,
                 pagina = pagina,
@@ -218,9 +245,9 @@ private fun TelaAlarme(alarme: Alarme) {
 }
 
 /**
- * Moldura das telas do alarme: ícone pulsando, hora e nome, e [conteudo] (a etapa). Em pé, um embaixo do
- * outro, numa coluna rolável com altura mínima da tela (centraliza quando cabe e rola em celulares
- * pequenos); [deitado], lado a lado, com a etapa rolando sozinha na metade dela.
+ * Moldura das telas do alarme: ícone pulsando, hora e nome, [conteudo] (a etapa) e, nos testes, o [rodape] (os
+ * botões de fase). Em pé, um embaixo do outro, numa coluna rolável com altura mínima da tela (centraliza quando cabe e
+ * rola em celulares pequenos); [deitado], lado a lado, com a etapa rolando sozinha na metade dela.
  */
 @Composable
 private fun PaginaAlarme(
@@ -231,6 +258,7 @@ private fun PaginaAlarme(
     pulso: State<Float>,
     hora: String,
     nome: String,
+    rodape: (@Composable () -> Unit)?,
     conteudo: @Composable () -> Unit,
 ) {
     val cabecalho = @Composable {
@@ -252,7 +280,13 @@ private fun PaginaAlarme(
     val etapa = remember { movableContentOf { corpo: @Composable () -> Unit -> corpo() } }
     if (deitado) {
         Row(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { cabecalho() }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                cabecalho()
+                if (rodape != null) {
+                    Spacer(Modifier.height(16.dp))
+                    rodape()
+                }
+            }
             Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 Column(Modifier.verticalScroll(rolagem), horizontalAlignment = Alignment.CenterHorizontally) { etapa(conteudo) }
             }
@@ -277,6 +311,70 @@ private fun PaginaAlarme(
             Spacer(Modifier.height(16.dp))
             etapa(conteudo)
             Spacer(Modifier.height(24.dp))
+        }
+        if (rodape != null) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                rodape()
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Os botões de um alarme de teste, no pé da tela: "Back" e "Next" andam pelas fases do teste ([FaseDoTeste]:
+ * conversa, prazo e caminhada; ou câmera, frases (se há alguma, [comFrases]) e câmera exigente), e "Cancel" acaba o
+ * teste, com uma confirmação (o segundo toque em 4 s). Em cima, as fases, com a atual marcada. Textos curtos e pouca
+ * margem interna: três botões numa tela de 384 dp.
+ */
+@Composable
+private fun BotoesDoTeste(fase: FaseDoTeste, comFrases: Boolean, cor: Color, onIr: (FaseDoTeste) -> Unit, onCancelar: () -> Unit) {
+    var confirmando by remember { mutableStateOf(false) }
+    LaunchedEffect(confirmando) {
+        if (confirmando) {
+            delay(4_000)
+            confirmando = false
+        }
+    }
+    val anterior = fase.anterior(comFrases)
+    val proxima = fase.proxima(comFrases)
+    val margem = PaddingValues(horizontal = 6.dp)
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "Test · " + fase.fases(comFrases).joinToString("  ›  ") { if (it == fase) "● ${it.rotulo}" else it.rotulo },
+            color = cor.copy(alpha = 0.8f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val borda = BorderStroke(1.dp, cor.copy(alpha = 0.6f))
+            OutlinedButton(
+                onClick = { anterior?.let(onIr) },
+                enabled = anterior != null,
+                modifier = Modifier.weight(1f),
+                contentPadding = margem,
+                border = borda,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = cor, disabledContentColor = cor.copy(alpha = 0.3f)),
+            ) { Text("◀ Back", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp) }
+            Button(
+                onClick = { if (confirmando) onCancelar() else confirmando = true },
+                modifier = Modifier.weight(1.3f),
+                contentPadding = margem,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (confirmando) VermelhoAlarme else cor.copy(alpha = 0.12f),
+                    contentColor = if (confirmando) Color.White else cor,
+                ),
+            ) { Text(if (confirmando) "Tap again to end" else "✕ Cancel test", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp) }
+            OutlinedButton(
+                onClick = { proxima?.let(onIr) },
+                enabled = proxima != null,
+                modifier = Modifier.weight(1f),
+                contentPadding = margem,
+                border = borda,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = cor, disabledContentColor = cor.copy(alpha = 0.3f)),
+            ) { Text("Next ▶", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp) }
         }
     }
 }

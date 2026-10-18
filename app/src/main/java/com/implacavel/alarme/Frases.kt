@@ -1,6 +1,6 @@
 // Frases motivacionais da verificação do meio da atividade: a voz fala uma, a pessoa repete. Curtas, mas
 // não tanto quanto "I want to be rich"; sem contrações ("I am", não "I'm"), pro reconhecedor conferir
-// melhor. Pra mudar, é só mexer na lista: todo dia o app sorteia 5 dela (frasesDoDia).
+// melhor. Pra mudar, é só mexer na lista: todo dia o app sorteia dela quantas o dono pediu (frasesDoDia; de começo, 5).
 package com.implacavel.alarme
 
 import java.time.LocalDate
@@ -39,9 +39,6 @@ val FRASES_MOTIVACIONAIS = listOf(
     "I am wide awake and ready for real work",
 )
 
-/** Quantas frases a verificação pede. */
-const val FRASES_POR_VERIFICACAO = 5
-
-/** As frases do [dia], sorteadas da lista: sempre as mesmas no mesmo dia, outras no dia seguinte. */
-fun frasesDoDia(dia: LocalDate): List<String> =
-    FRASES_MOTIVACIONAIS.shuffled(Random(dia.toEpochDay())).take(FRASES_POR_VERIFICACAO)
+/** As [quantas] frases do [dia] ([Tempos.frases]), sorteadas da lista: sempre as mesmas no mesmo dia, outras no dia seguinte. */
+fun frasesDoDia(dia: LocalDate, quantas: Int = TEMPOS_PADRAO.frases): List<String> =
+    FRASES_MOTIVACIONAIS.shuffled(Random(dia.toEpochDay())).take(quantas.coerceIn(0, FRASES_MOTIVACIONAIS.size))

@@ -115,6 +115,30 @@ class AlarmeTest {
         assertEquals(semMusica, EmAndamento.deJson(semMusica.paraJson()))
         val caminhada = em.copy(alarme = Alarme(4, 6, 0, caminhada = true))
         assertEquals(caminhada, EmAndamento.deJson(caminhada.paraJson()))
+        // Os tempos dos ajustes na hora em que tocou vão junto (a subida do volume e as etapas)
+        val ajustado = em.copy(tempos = Tempos(volumeInicio = 0.25f, volumeFim = 0.80f, cameraFacilMin = 7, frases = 2, caminhadaMin = 25))
+        assertEquals(ajustado, EmAndamento.deJson(ajustado.paraJson()))
+        // Gravação de antes dos ajustes: os tempos de sempre
+        val antiga = em.paraJson().apply { remove("tempos") }
+        assertEquals(TEMPOS_PADRAO, EmAndamento.deJson(antiga).tempos)
+    }
+
+    @Test
+    fun volumeDaMusicaSegueOsAjustesMenosNoTeste() {
+        // 25% a 80% em 30 s, nos 15 degraus do S24 FE; o remédio não muda
+        val em = EmAndamento(Alarme(1, 7, 0), desde = 0, musica = null, volume = 3, tempos = Tempos(volumeInicio = 0.25f, volumeFim = 0.80f))
+        assertEquals(4, em.volumeAgora(maximo = 15, agoraMs = 0)) // 25% (3,75)
+        assertEquals(12, em.volumeAgora(maximo = 15, agoraMs = 30_000)) // 80%
+        assertEquals(12, em.volumeDosAvisos(maximo = 15))
+        val remedio = em.copy(alarme = Alarme(2, 8, 0, missao = false, remedio = true))
+        assertEquals(2, remedio.volumeAgora(maximo = 15, agoraMs = 0)) // 15%
+        // Um teste em casa fica na subida de sempre, 10% a 40%, mesmo com os ajustes altos (vizinhos e família por perto)
+        val teste = em.copy(alarme = Alarme.teste())
+        assertEquals(SUBIDA_ALARME, teste.subida)
+        assertEquals(6, teste.volumeAgora(maximo = 15, agoraMs = 30_000)) // 40%
+        assertEquals(6, teste.volumeDosAvisos(maximo = 15))
+        // O alarme de verdade que toma o lugar do teste volta pra subida dos ajustes
+        assertEquals(12, teste.juntar(Alarme(1, 7, 0), agora = 1_000).volumeDosAvisos(maximo = 15))
     }
 
     @Test
@@ -139,7 +163,7 @@ class AlarmeTest {
         val teste = EmAndamento(Alarme.teste(), desde = 0, musica = "content://musica/1", volume = 3)
         val junto = teste.juntar(Alarme(5, 7, 0), agora = 99)
         assertEquals(EmAndamento(Alarme(5, 7, 0), desde = 99, musica = "content://musica/1", volume = 3), junto)
-        assertEquals(META_OLHAR_MS, metaOlhar(junto.alarme)) // 40 min, não os 30 s do teste
+        assertEquals(minutos(TEMPOS_PADRAO.cameraMin), metaOlhar(junto.alarme)) // 40 min, não os 30 s do teste
         assertEquals(99L, junto.desde) // a subida do volume recomeça com ele
         // Com as regras dele: alarme sem missão continua sem missão
         assertFalse(teste.juntar(Alarme(6, 7, 0, missao = false), agora = 99).alarme.missao)

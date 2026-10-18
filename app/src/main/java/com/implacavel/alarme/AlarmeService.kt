@@ -58,13 +58,14 @@ import java.time.LocalTime
  * [Escuta], daqui mesmo.
  * O comando reexibir vem da notificação arrastada pro lado.
  */
-/** Um passo da verificação do meio: a [frase] da vez ([numero] de 5; vazia na fala de abertura e no agradecimento) e se é a [suaVez] de repetir. */
-data class Verificacao(val frase: String, val numero: Int, val suaVez: Boolean)
+/** Um passo da verificação do meio: a [frase] da vez ([numero] de [total]; vazia na fala de abertura e no agradecimento) e se é a [suaVez] de repetir. */
+data class Verificacao(val frase: String, val numero: Int, val total: Int, val suaVez: Boolean)
 
 /**
  * A conversa da manhã com a IA: a [falaDaIa] mostrada, se é a [suaVez] de a pessoa falar, o que ela disse nesta vez
- * ([ouvido]), se o app está [pensando] (esperando a IA ou a voz gravar), o tempo de conversa pura ([conversadoMs]) e a
- * meta, e se a pergunta agora é se ela quer continuar ([perguntandoSeContinua]).
+ * ([ouvido]), se o app está [pensando] (esperando a IA ou a voz gravar), o que a IA está procurando na internet
+ * ([procurando], vazio fora de uma busca), o tempo de conversa pura ([conversadoMs]) e a meta, e se a pergunta agora
+ * é se ela quer continuar ([perguntandoSeContinua]).
  */
 data class Conversa(
     val falaDaIa: String,
@@ -74,6 +75,7 @@ data class Conversa(
     val metaMs: Long,
     val perguntandoSeContinua: Boolean = false,
     val ouvido: String = "",
+    val procurando: String = "",
 )
 
 /** A caminhada da manhã: o tempo já [andadoMs] (guardado pelo serviço), a meta e o fim do prazo pra sair de casa ([prazoAte], SystemClock.elapsedRealtime). */
@@ -101,11 +103,16 @@ class AlarmeService : Service() {
         private const val ACAO_REPETIU = "repetiu"
         private const val ACAO_SEM_VOZ = "sem_voz"
         private const val ACAO_ANDANDO = "andando"
+        private const val ACAO_ONDAS = "ondas"
+        private const val ACAO_FASE = "fase"
+        private const val ACAO_CANCELAR_TESTE = "cancelar_teste"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_OLHADO = "olhado"
         private const val EXTRA_COMEMORAR = "comemorar"
         private const val EXTRA_ANDADO = "andado"
+        private const val EXTRA_LIGADAS = "ligadas"
+        private const val EXTRA_FASE = "fase"
 
         /**
          * Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. O Android ainda leva
@@ -142,25 +149,28 @@ class AlarmeService : Service() {
         /** Na conversa, se a voz travar gravando a fala da IA, ela vai só na tela depois disso e a vez passa pra pessoa. */
         private const val VOZ_DA_IA_MAX_MS = 10_000L
 
+        /** No teste, "Back" pra conversa carrega o modelo de novo, lê a instrução e abre: cabe tudo nisso, mesmo com as anotações ainda em curso. */
+        private const val VOLTA_MAX_MS = 60_000L
+
         /** O bipe do silêncio na conversa demora isso pra começar a sair (o MediaPlayer): a escuta fica surda também. */
         private const val ATRASO_DO_BIPE_MS = 300L
 
         /** O reconhecedor fecha a frase até isso depois de a IA começar a pensar, às vezes com uma palavra a mais: não é fala nova. */
         private const val FRASE_ATRASADA_MS = 1_000L
 
-        /** Falas fixas, gravadas assim que a voz fica pronta: o início e os avisos de 10, 20 e 30 min. */
+        /** Falas fixas, gravadas assim que a voz fica pronta: o início e os avisos de 10 em 10 min (a câmera vai até 60 min: avisos de 10 a 50). */
         private const val FALA_DO_INICIO = "inicio"
         private const val FALA_DO_FIM = "fim"
         private const val FALA_DE_VERIFICAR = "verificar"
         private const val FALA_DA_METADE = "metade"
         private val FALAS_FIXAS = mapOf(FALA_DO_INICIO to FALA_INICIO, FALA_DO_FIM to FALA_FIM, FALA_DE_VERIFICAR to FALA_VERIFICAR, FALA_DA_METADE to FALA_METADE) +
-            (1 until (META_OLHAR_MS / MARCO_MS).toInt()).associate { "minutos_${it * 10}" to falaDosMinutos(it * 10) }
+            (1 until MINUTOS_DA_CAMERA.last * 2 / 10).associate { "minutos_${it * 10}" to falaDosMinutos(it * 10) }
 
         /** As falas fixas da conversa e da caminhada: gravadas só no despertador "conversa + caminhada" (o outro fica igual). */
         private const val FALA_DE_CONTINUAR = "continuar"
         private const val FALA_DE_SAIR = "sair"
         private const val FALA_DE_NAO_NEGOCIAR = "nao_negocia"
-        private val FALAS_DA_CONVERSA = mapOf(FALA_DE_CONTINUAR to FALA_CONTINUAR, FALA_DE_SAIR to FALA_SAIR, FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA)
+        private const val FALA_DE_PROCURAR = "procurar"
 
         private val _tocando = MutableStateFlow<Alarme?>(null)
 
@@ -239,6 +249,14 @@ class AlarmeService : Service() {
         /** Na caminhada: quando (SystemClock.elapsedRealtime) chegou o último sinal de "andando", ou a etapa começou. A vigia e a contagem pro bipe contam daqui. */
         val ultimoPasso: StateFlow<Long> = _ultimoPasso.asStateFlow()
 
+        private val _temposDoAlarme = MutableStateFlow(TEMPOS_PADRAO)
+
+        /**
+         * Os tempos do alarme tocando: a foto dos ajustes na hora em que ele tocou ([EmAndamento.tempos]), não os ajustes
+         * de agora. A tela do alarme mede a câmera por aqui; mexer nos ajustes com o alarme tocando não muda a missão.
+         */
+        val temposDoAlarme: StateFlow<Tempos> = _temposDoAlarme.asStateFlow()
+
         /** Toca o alarme em andamento (ou atualiza o que já toca). */
         fun tocar(ctx: Context) {
             // Só falha se o disparo veio sem alarme exato (Android 12 sem a permissão): aí o sistema
@@ -291,6 +309,15 @@ class AlarmeService : Service() {
          */
         fun andando(ctx: Context, andadoMs: Long) { ctx.startService(comando(ctx, ACAO_ANDANDO).putExtra(EXTRA_ANDADO, andadoMs)) }
 
+        /** O botão das ondas na tela da caminhada: [ligadas] ou mudas, agora e nas próximas manhãs ([Ajustes.ondasMudas]). */
+        fun ondas(ctx: Context, ligadas: Boolean) { ctx.startService(comando(ctx, ACAO_ONDAS).putExtra(EXTRA_LIGADAS, ligadas)) }
+
+        /** Os botões "Back" e "Forward" de um alarme de teste: a manhã pula pra [fase] ([FaseDoTeste]). Num alarme de verdade, nada. */
+        fun irPraFase(ctx: Context, fase: FaseDoTeste) { ctx.startService(comando(ctx, ACAO_FASE).putExtra(EXTRA_FASE, fase.name)) }
+
+        /** O botão "Cancel test" (depois da confirmação): o alarme de teste acaba agora, sem comemoração. Num alarme de verdade, nada. */
+        fun cancelarTeste(ctx: Context) { ctx.startService(comando(ctx, ACAO_CANCELAR_TESTE)) }
+
         private fun comando(ctx: Context, acao: String) = Intent(ctx, AlarmeService::class.java).setAction(acao)
     }
 
@@ -303,7 +330,7 @@ class AlarmeService : Service() {
     private var foraAte = 0L // SystemClock.elapsedRealtime
     private var bipes = 0 // da vigia, desde o último sinal de "olhando"
     private var cumprido = false // depois disso, só a comemoração: nada traz a música de volta
-    private val frasesDeHoje = frasesDoDia(LocalDate.now())
+    private val frasesDeHoje by lazy { frasesDoDia(LocalDate.now(), tempos().frases) } // lido na primeira vez, já com os tempos do alarme
     private var apitos = 0 // da verificação, desde a última fala da pessoa
     private var vezComecou = 0L // SystemClock.elapsedRealtime em que começou a vez da pessoa na frase atual
     private var rodadaVerificacao = 0 // muda ao começar ou cancelar: sons atrasados de uma rodada velha não avançam a nova
@@ -342,6 +369,17 @@ class AlarmeService : Service() {
     private var andado = 0L // tempo andando na caminhada
     private var prazoAte = 0L // fim do prazo pra sair de casa (SystemClock.elapsedRealtime; 0 = ainda não começou)
     private var bipesParado = 0 // da vigia da caminhada, desde o último sinal de "andando"
+    private val transcricao = mutableListOf<Turno>() // a conversa de hoje, pras anotações da IA no fim ([MotorDaConversa.anotar])
+
+    /** Os tempos deste alarme ([Tempos]): a foto dos ajustes de quando ele tocou ([EmAndamento.tempos]), lida em [onCreate] e [iniciar]. */
+    private fun tempos(): Tempos = _temposDoAlarme.value
+
+    /** O motor da IA e o modelo fora da memória (a manhã não vai mais ter conversa). */
+    private fun soltarIa() {
+        motor?.desligar()
+        motor = null
+        MotorDaConversa.liberar()
+    }
 
     /**
      * Enquanto toca: empurra a retomada pra frente (se o app morrer, ela dispara e o alarme volta) e
@@ -436,6 +474,8 @@ class AlarmeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Os tempos do alarme antes de tudo: as frases de hoje (gravadas pela voz logo abaixo) seguem a foto dele
+        Ajustes.emAndamento?.let { _temposDoAlarme.value = it.tempos }
         sirene = Sirene(this)
         prepararVoz()
         processador = getSystemService(PowerManager::class.java)
@@ -465,12 +505,24 @@ class AlarmeService : Service() {
     }
 
     /**
-     * As falas fixas mais as 5 frases de hoje da verificação; no despertador "conversa + caminhada", também as da
-     * conversa e da caminhada. Se um desses juntar depois, as falas dela não estão gravadas: vão só na tela.
+     * As falas fixas mais as frases de hoje da verificação; no despertador "conversa + caminhada", também as da
+     * conversa e da caminhada (a de sair diz o prazo dos ajustes). Se um desses juntar depois, as falas dela não
+     * estão gravadas: vão só na tela.
      */
-    private fun falasFixas() = FALAS_FIXAS +
-        (if (Ajustes.emAndamento?.alarme?.let(::comConversaECaminhada) == true) FALAS_DA_CONVERSA else emptyMap()) +
-        frasesDeHoje.mapIndexed { i, frase -> "frase_$i" to frase }
+    private fun falasFixas(): Map<String, String> {
+        val alarme = Ajustes.emAndamento?.alarme
+        val daConversa = if (alarme != null && comConversaECaminhada(alarme)) {
+            mapOf(
+                FALA_DE_CONTINUAR to FALA_CONTINUAR,
+                FALA_DE_SAIR to falaDeSair(prazoSair(alarme, tempos())),
+                FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA,
+                FALA_DE_PROCURAR to FALA_PROCURAR,
+            )
+        } else {
+            emptyMap()
+        }
+        return FALAS_FIXAS + daConversa + frasesDeHoje.mapIndexed { i, frase -> "frase_$i" to frase }
+    }
 
     /**
      * Enquanto um alarme toca, o log do app (só o dele, tag [TAG]) também vai pra um arquivo na pasta do app
@@ -523,6 +575,13 @@ class AlarmeService : Service() {
                 agradecer()
             }
             acao == ACAO_ANDANDO -> andou(intent.getLongExtra(EXTRA_ANDADO, 0L))
+            acao == ACAO_ONDAS -> ondas(intent.getBooleanExtra(EXTRA_LIGADAS, true))
+            // Os botões de fase e de cancelar só existem na tela de um alarme de teste; um comando atrasado não mexe num alarme de verdade
+            acao == ACAO_FASE -> if (alarme.deTeste) intent.getStringExtra(EXTRA_FASE)?.let { nome -> FaseDoTeste.entries.firstOrNull { it.name == nome } }?.let(::irPraFase)
+            acao == ACAO_CANCELAR_TESTE -> if (alarme.deTeste && !cumprido) {
+                Log.i(TAG, "Teste: cancelado pelo botão")
+                concluir(comemorar = false)
+            }
         }
         return START_NOT_STICKY
     }
@@ -578,14 +637,16 @@ class AlarmeService : Service() {
         // Alarme novo: nada da conversa e da caminhada de antes
         if (!jaTocava) esquecerManha()
         _tocando.value = alarme
+        _temposDoAlarme.value = em.tempos
         mostrarNotificacao(alarme)
         sirene.preparar(em, comeco = !jaTocava)
         // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está.
         // Se a meta subiu (alarme de verdade no lugar do teste), a verificação da metade vale de novo
         if (jaTocava) {
             ajustarManha(alarme)
-            if (caminho == null) prepararIa(alarme, em)
-            if (_olhado.value < metaOlhar(alarme) / 2) _metadeVerificada.value = false
+            // O alarme que juntou é o "câmera + frases": a IA preparada durante a música (motor e modelo) não vai servir
+            if (!comConversaECaminhada(alarme)) soltarIa() else if (caminho == null) prepararIa(alarme, em)
+            if (_olhado.value < verificacaoEm(alarme, tempos())) _metadeVerificada.value = false
             return
         }
         gravarDiagnostico()
@@ -616,12 +677,20 @@ class AlarmeService : Service() {
 
     /**
      * Começa a carregar o modelo da IA (o despertador "conversa + caminhada", sem a IA bloqueada) e grava que
-     * ela foi tentada neste alarme ([Ajustes.iaTentadaEm]). Já carregado ou carregando, não faz nada de novo.
+     * ela foi tentada neste alarme ([Ajustes.iaTentadaEm]). Já carregado ou carregando, não faz nada de novo. Ainda
+     * com a música, também busca as notícias e deixa a IA lendo a instrução ([MotorDaConversa.aquecer], uns 9 s): no
+     * fim do bom dia, só falta a abertura (uns 3 s). Sem o motor pronto no STOP, [prepararManha] faz tudo de novo.
      */
     private fun prepararIa(alarme: Alarme, em: EmAndamento) {
         if (!comConversaECaminhada(alarme) || iaBloqueada || !MotorDaConversa.disponivel(this)) return
         Ajustes.iaTentadaEm = em.desde
         MotorDaConversa.preparar(this)
+        if (motor != null) return
+        val rodada = rodadaConversa
+        Noticias.buscar { manchetes, metas ->
+            if (rodada != rodadaConversa || caminho != null || motor != null || cumprido || _silenciado.value) return@buscar
+            criarMotor(manchetes, metas)?.aquecer()
+        }
     }
 
     /**
@@ -673,7 +742,12 @@ class AlarmeService : Service() {
         _silenciado.value = true
         _saudando.value = true
         // Missão de 40 min já começada: um "conversa + caminhada" que juntar depois não muda o caminho
-        if (manhaNova()) prepararManha() else if (caminho == null) caminho = CaminhoDaManha.ANTIGO
+        if (manhaNova()) {
+            prepararManha()
+        } else if (caminho == null) {
+            caminho = CaminhoDaManha.ANTIGO
+            soltarIa() // uma IA preparada durante a música não vai servir
+        }
         _comCaminhada.value = manhaNova()
         // Do bom dia ao fim da conversa, o alto-falante não dorme: a fala depois de um silêncio começaria baixinha
         if (manhaNova() && etapa != EtapaDaManha.CAMINHADA) sirene.manterAcordado(true)
@@ -720,9 +794,11 @@ class AlarmeService : Service() {
         if (!_silenciado.value || _saudando.value || _verificacao.value != null || _conversa.value != null || _caminhada.value != null || cumprido) return
         val antes = _olhado.value
         _olhado.value = maxOf(antes, olhadoMs)
-        val meta = _tocando.value?.let(::metaOlhar) ?: return
-        if (!_metadeVerificada.value && _olhado.value >= meta / 2) return iniciarVerificacao()
-        marcoCompletado(antes, _olhado.value, meta)?.let { minutos ->
+        val alarme = _tocando.value ?: return
+        val meta = metaOlhar(alarme, tempos())
+        val verificacao = verificacaoEm(alarme, tempos())
+        if (!_metadeVerificada.value && _olhado.value >= verificacao) return iniciarVerificacao()
+        marcoCompletado(antes, _olhado.value, meta, verificacao)?.let { minutos ->
             Log.i(TAG, "Missão: $minutos min de câmera")
             sirene.falarDepoisDeAcordar(voz?.fixa("minutos_$minutos"))
         }
@@ -736,14 +812,16 @@ class AlarmeService : Service() {
     }
 
     /**
-     * Metade da atividade: o anel para (a tela da câmera sai), toca o bipe leve, a voz diz [FALA_VERIFICAR]
-     * e, [PAUSA_ANTES_DAS_FRASES_MS] depois, começam as frases.
+     * Fim do modo fácil da câmera: o anel para (a tela da câmera sai), toca o bipe leve, a voz diz [FALA_VERIFICAR]
+     * e, [PAUSA_ANTES_DAS_FRASES_MS] depois, começam as frases. Com zero frases nos ajustes, só o agradecimento e o
+     * modo exigente ([agradecer]).
      */
     private fun iniciarVerificacao() {
-        Log.i(TAG, "Missão: metade da atividade, verificação com ${frasesDeHoje.size} frases")
+        Log.i(TAG, "Missão: fim do modo fácil da câmera, verificação com ${frasesDeHoje.size} frases")
         handler.removeCallbacks(vigia)
         val rodada = ++rodadaVerificacao
-        _verificacao.value = Verificacao(frase = "", numero = 0, suaVez = false)
+        if (frasesDeHoje.isEmpty()) return agradecer()
+        _verificacao.value = Verificacao(frase = "", numero = 0, total = frasesDeHoje.size, suaVez = false)
         sirene.leve {
             sirene.falar(voz?.fixa(FALA_DE_VERIFICAR)) {
                 if (rodada == rodadaVerificacao) handler.postDelayed({ if (rodada == rodadaVerificacao) falarFrase(0) }, PAUSA_ANTES_DAS_FRASES_MS)
@@ -754,7 +832,7 @@ class AlarmeService : Service() {
     /** A voz fala a frase [i] (a tela também mostra); quando termina, é a vez da pessoa repetir. */
     private fun falarFrase(i: Int) {
         val rodada = rodadaVerificacao
-        _verificacao.value = Verificacao(frasesDeHoje[i], numero = i + 1, suaVez = false)
+        _verificacao.value = Verificacao(frasesDeHoje[i], numero = i + 1, total = frasesDeHoje.size, suaVez = false)
         sirene.falar(voz?.fixa("frase_$i")) {
             if (rodada != rodadaVerificacao) return@falar
             _verificacao.value = _verificacao.value?.copy(suaVez = true)
@@ -804,13 +882,13 @@ class AlarmeService : Service() {
     /** Fim da verificação: a voz agradece ([FALA_METADE]) e a câmera volta, agora mais exigente. */
     private fun agradecer() {
         val rodada = rodadaVerificacao
-        _verificacao.value = Verificacao(frase = "", numero = frasesDeHoje.size, suaVez = false)
+        _verificacao.value = Verificacao(frase = "", numero = frasesDeHoje.size, total = frasesDeHoje.size, suaVez = false)
         sirene.falar(voz?.fixa(FALA_DA_METADE)) {
             if (rodada != rodadaVerificacao) return@falar
-            Log.i(TAG, "Missão: verificação feita, a segunda metade é mais exigente com os olhos")
+            Log.i(TAG, "Missão: verificação feita, a câmera agora é mais exigente com os olhos")
             _verificacao.value = null
-            // A meta pode ter subido no meio (alarme de verdade tomou o lugar do teste): aí a metade ainda não chegou
-            _metadeVerificada.value = _olhado.value >= (_tocando.value?.let(::metaOlhar) ?: 0L) / 2
+            // A meta pode ter subido no meio (alarme de verdade tomou o lugar do teste): aí o modo fácil ainda não acabou
+            _metadeVerificada.value = _olhado.value >= (_tocando.value?.let { verificacaoEm(it, tempos()) } ?: 0L)
             adiarVigia()
         }
     }
@@ -858,33 +936,26 @@ class AlarmeService : Service() {
     private fun manhaNova(): Boolean = _tocando.value?.let { comConversaECaminhada(it) } == true && caminho != CaminhoDaManha.ANTIGO
 
     /**
-     * No STOP, enquanto a voz dá bom dia: na primeira vez, busca em segundo plano as notícias e as metas (e com elas
-     * a abertura da IA). Sem a IA ([MotorDaConversa.disponivel]), não busca nada: a manhã vai direto pra caminhada.
-     * Com o caminho já decidido (a música voltou no meio), também não.
+     * No STOP, enquanto a voz dá bom dia: na primeira vez, pede a abertura da IA (o motor já pronto desde a música,
+     * [prepararIa], ou, sem ele, busca as notícias e as metas e cria um). Sem a IA ([MotorDaConversa.disponivel]),
+     * não busca nada: a manhã vai direto pra caminhada. Com o caminho já decidido (a música voltou no meio), também não.
      */
     private fun prepararManha() {
         saudacaoTerminou = false
         if (caminho != null) return
         abertura = null
         aberturaChegou = false
-        motor?.desligar()
-        motor = null
         if (iaBloqueada || !MotorDaConversa.disponivel(this)) {
             Log.i(TAG, "Conversa: ${if (iaBloqueada) "o app já caiu neste alarme" else "sem a IA no celular"}, direto pra caminhada")
+            motor?.desligar()
+            motor = null
             MotorDaConversa.liberar()
             aberturaChegou = true // sem abertura: o [decidir] escolhe só a caminhada
             return
         }
         Ajustes.emAndamento?.let { Ajustes.iaTentadaEm = it.desde }
         val rodada = rodadaConversa
-        Noticias.buscar { manchetes, metas ->
-            if (rodada != rodadaConversa) return@buscar
-            val ia = MotorDaConversa.criar(this, instrucaoDoTreinador(manchetes, metas, LocalTime.now()), pedidoDeAbertura(manchetes), FALA_NAO_NEGOCIA)
-                .also { motor = it }
-            if (ia == null) { // o motor não abriu: sem abertura, só a caminhada
-                aberturaChegou = true
-                return@buscar decidir()
-            }
+        val pedirAbertura = { ia: MotorDaConversa ->
             ia.abrir { fala ->
                 if (rodada != rodadaConversa) return@abrir
                 abertura = fala
@@ -892,6 +963,38 @@ class AlarmeService : Service() {
                 decidir()
             }
         }
+        motor?.let { return pedirAbertura(it) }
+        Noticias.buscar { manchetes, metas ->
+            if (rodada != rodadaConversa) return@buscar
+            val ia = criarMotor(manchetes, metas)
+            if (ia == null) { // o motor não abriu: sem abertura, só a caminhada
+                aberturaChegou = true
+                return@buscar decidir()
+            }
+            pedirAbertura(ia)
+        }
+    }
+
+    /**
+     * O motor da IA desta manhã, com a instrução feita das [manchetes], das [metas], do que o dono contou de si e das
+     * anotações das manhãs de antes ([Ajustes.memoriaDaIa]); null sem o modelo. Quando ela pede uma busca, a tela
+     * mostra o que ela procura e a voz avisa ([FALA_PROCURAR]), pra espera não parecer travada.
+     */
+    private fun criarMotor(manchetes: List<String>, metas: String): MotorDaConversa? {
+        val memoria = Ajustes.memoriaDaIa.value
+        val instrucao = instrucaoDoTreinador(manchetes, metas, LocalTime.now(), Ajustes.sobreMim.value, memoria)
+        val ia = MotorDaConversa.criar(this, instrucao, pedidoDeAbertura(manchetes, memoria), FALA_NAO_NEGOCIA) ?: return null
+        // O mesmo motor segue depois de a música voltar (a rodada muda): basta a conversa estar esperando a IA
+        ia.aoProcurar = { consulta ->
+            val c = _conversa.value
+            if (motor === ia && c != null && c.pensando) {
+                Log.i(TAG, "Conversa: a IA está procurando na internet")
+                _conversa.value = c.copy(procurando = consulta)
+                falarNaConversa(voz?.fixa(FALA_DE_PROCURAR)) {}
+            }
+        }
+        motor = ia
+        return ia
     }
 
     /**
@@ -960,8 +1063,8 @@ class AlarmeService : Service() {
         }
     }
 
-    /** Quanto de conversa a manhã pede agora: a meta do [alarme], mais o tempo extra se a pessoa quis continuar. */
-    private fun metaDaConversa(alarme: Alarme) = metaConversa(alarme) + extras * extraDaConversa(alarme)
+    /** Quanto de conversa a manhã pede agora: a meta do [alarme] (pelos ajustes), mais o tempo extra se a pessoa quis continuar. */
+    private fun metaDaConversa(alarme: Alarme) = metaConversa(alarme, tempos()) + extras * extraDaConversa(alarme)
 
     /**
      * A conversa começa com a [primeira] fala da IA ou, sem ela, volta depois da música, com a IA retomando
@@ -1023,8 +1126,8 @@ class AlarmeService : Service() {
     private fun pedirAIa(pedido: PedidoDaIa) {
         if (falhas == 0) esperaDesde = SystemClock.elapsedRealtime() // fala nova: a espera conta daqui (pedir de novo não recomeça)
         ultimoPedido = pedido
-        // Com a resposta segurada (ele fez um som), pedir de novo não tira a vez dele
-        if (provisoria?.segurada != true) _conversa.value = _conversa.value?.copy(suaVez = false, pensando = true)
+        // Com a resposta segurada (ele fez um som), pedir de novo não tira a vez dele. A busca da fala anterior não vale mais
+        if (provisoria?.segurada != true) _conversa.value = _conversa.value?.copy(suaVez = false, pensando = true, procurando = "")
         val rodada = rodadaConversa
         val este = ++pedidosDaIa
         val vale = { rodada == rodadaConversa && este == pedidosDaIa } // só a primeira de resposta e prazo conta
@@ -1117,7 +1220,8 @@ class AlarmeService : Service() {
     private fun tocarFalaDaIa(texto: String, arquivo: File?) {
         val rodada = rodadaConversa
         provisoria = null
-        _conversa.value = _conversa.value?.copy(falaDaIa = texto, suaVez = false, pensando = false)
+        transcricao += Turno(daIa = true, texto = texto)
+        _conversa.value = _conversa.value?.copy(falaDaIa = texto, suaVez = false, pensando = false, procurando = "")
         iaFalando = arquivo != null
         falarNaConversa(arquivo) {
             if (rodada != rodadaConversa) return@falarNaConversa
@@ -1244,6 +1348,7 @@ class AlarmeService : Service() {
         descartarResposta()
         _conversa.value = c.copy(suaVez = false, pensando = true)
         Log.i(TAG, "Conversa: ele parou (${texto.length} letras, ${escuta?.resumo()}), ${conversadoMs / 1000} s de ${c.metaMs / 1000}")
+        transcricao += Turno(daIa = false, texto = texto)
         when {
             c.perguntandoSeContinua -> respondeuSeContinua(texto)
             conversadoMs < c.metaMs -> {
@@ -1275,8 +1380,9 @@ class AlarmeService : Service() {
     }
 
     /**
-     * Fim da conversa (meta cumprida, a pessoa não quis mais, ou a IA ou o reconhecimento de voz falharam): o modelo
-     * sai da memória e vem a caminhada ([irPraCaminhada]).
+     * Fim da conversa (meta cumprida, a pessoa não quis mais, ou a IA ou o reconhecimento de voz falharam): a IA
+     * anota o que soube dele pra manhã seguinte ([MotorDaConversa.anotar], se ele falou alguma coisa), o modelo sai da
+     * memória e vem a caminhada ([irPraCaminhada]). As anotações ficam prontas em segundo plano, já na caminhada.
      */
     private fun terminarConversa(motivo: String) {
         if (etapa != EtapaDaManha.CONVERSA) return
@@ -1284,16 +1390,28 @@ class AlarmeService : Service() {
         handler.removeCallbacks(tiqueDaConversa)
         handler.removeCallbacks(fimDaVez)
         pararEscuta()
-        motor?.desligar()
+        val ia = motor
+        if (ia != null && transcricao.any { !it.daIa }) {
+            ia.anotar(Ajustes.memoriaDaIa.value, transcricao.toList()) { novas ->
+                if (novas.isNullOrBlank()) Log.w(TAG, "Conversa: a IA não deixou anotações") else Ajustes.guardarMemoriaDaIa(novas)
+            }
+        }
+        ia?.desligar()
         motor = null
-        MotorDaConversa.liberar() // antes da caminhada: menos memória e menos calor
+        MotorDaConversa.liberar() // antes da caminhada: menos memória e menos calor (depois das anotações, na fila do modelo)
         iaFalando = false
-        _conversa.value = _conversa.value?.copy(falaDaIa = FALA_SAIR, suaVez = false, pensando = false, perguntandoSeContinua = false)
+        _conversa.value = _conversa.value?.copy(falaDaIa = falaDeSair(prazoSairDaquiAte()), suaVez = false, pensando = false, perguntandoSeContinua = false, procurando = "")
         irPraCaminhada()
     }
 
+    /** O prazo pra sair que vem agora: o que já estava marcado (a música voltou, ou os botões do teste mexeram), ou o do alarme pelos ajustes. */
+    private fun prazoSairDaquiAte(): Long {
+        val alarme = _tocando.value ?: return 0L
+        return if (prazoAte == 0L) prazoSair(alarme, tempos()) else (prazoAte - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+    }
+
     /**
-     * A caminhada vem agora (fim da conversa ou, sem a IA, logo depois do bom dia): a voz fala [FALA_SAIR] e ela começa.
+     * A caminhada vem agora (fim da conversa ou, sem a IA, logo depois do bom dia): a voz fala a de sair ([falaDeSair]) e ela começa.
      * Um bom dia que ainda estava gravando (voz lenta, e o prazo dele já passou) não toca mais: por cima da fala, ela
      * nunca terminaria e a manhã ficaria parada. E se a fala travar, a caminhada começa assim mesmo em [SAUDACAO_MAX_MS].
      */
@@ -1320,14 +1438,16 @@ class AlarmeService : Service() {
     private fun comecarCaminhada() {
         val alarme = _tocando.value ?: return
         val agora = SystemClock.elapsedRealtime()
-        if (prazoAte == 0L) prazoAte = agora + prazoSair(alarme)
-        Log.i(TAG, "Caminhada: ${andado / 1000} s andados de ${metaCaminhada(alarme) / 1000}, ${maxOf(0L, prazoAte - agora) / 1000} s de prazo pra sair")
-        _caminhada.value = Caminhada(andadoMs = andado, metaMs = metaCaminhada(alarme), prazoAte = prazoAte)
-        // No prazo pra se vestir e sair, o som de ondas; ele mesmo deixa o alto-falante ligado
+        if (prazoAte == 0L) prazoAte = agora + prazoSair(alarme, tempos())
+        Log.i(TAG, "Caminhada: ${andado / 1000} s andados de ${metaCaminhada(alarme, tempos()) / 1000}, ${maxOf(0L, prazoAte - agora) / 1000} s de prazo pra sair")
+        _caminhada.value = Caminhada(andadoMs = andado, metaMs = metaCaminhada(alarme, tempos()), prazoAte = prazoAte)
+        // No prazo pra se vestir e sair, o som de ondas (se o dono não emudeceu); ele mesmo deixa o alto-falante ligado
+        handler.removeCallbacks(fimDasOndas)
         if (agora < prazoAte) {
-            sirene.ondas(true)
-            handler.removeCallbacks(fimDasOndas)
+            sirene.ondas(!Ajustes.ondasMudas)
             handler.postDelayed(fimDasOndas, prazoAte - agora)
+        } else {
+            sirene.ondas(false)
         }
         sirene.manterAcordado(false)
         adiarVigiaDaCaminhada()
@@ -1335,6 +1455,105 @@ class AlarmeService : Service() {
 
     /** Fim do prazo pra sair: as ondas param (daí em diante, parado, só os bipes). */
     private val fimDasOndas = Runnable { sirene.ondas(false) }
+
+    /** O botão das ondas na tela da caminhada: mudas ou [ligadas], agora (ainda no prazo pra sair) e nas próximas manhãs. */
+    private fun ondas(ligadas: Boolean) {
+        Ajustes.emudecerOndas(!ligadas)
+        if (_caminhada.value != null && SystemClock.elapsedRealtime() < prazoAte) sirene.ondas(ligadas)
+    }
+
+    /**
+     * Os botões "Back" e "Forward" de um alarme de teste: a manhã (ou a câmera) pula pra [fase]. Só muda o que a fase
+     * pede; o resto (tempo andado, anel) fica. Voltar pra conversa zera o tempo de conversa (senão a IA só perguntaria
+     * se ele quer continuar) e, se o modelo já saiu da memória, carrega de novo ([voltarPraConversa]).
+     */
+    private fun irPraFase(fase: FaseDoTeste) {
+        val alarme = _tocando.value ?: return
+        if (!_silenciado.value || _saudando.value || cumprido) return
+        val agora = SystemClock.elapsedRealtime()
+        val atual = faseDoTeste(
+            conversa = _conversa.value != null, caminhada = _caminhada.value != null, noPrazo = agora < prazoAte,
+            verificacao = _verificacao.value != null, metadeVerificada = _metadeVerificada.value, naCamera = caminho == CaminhoDaManha.ANTIGO || !comConversaECaminhada(alarme),
+        )
+        if (atual == null || atual == fase || fase !in atual.fases(comFrases = frasesDeHoje.isNotEmpty())) return
+        Log.i(TAG, "Teste: de $atual pra $fase pelos botões")
+        when (fase) {
+            FaseDoTeste.CONVERSA -> voltarPraConversa()
+            FaseDoTeste.PREPARO -> {
+                prazoAte = 0L // o prazo começa de novo, inteiro
+                if (atual == FaseDoTeste.CONVERSA) terminarConversa("avançou no teste") else comecarCaminhada()
+            }
+            FaseDoTeste.CAMINHADA -> {
+                prazoAte = agora // prazo já vencido: sem ondas, e os bipes de parado contam daqui
+                if (atual == FaseDoTeste.CONVERSA) terminarConversa("avançou no teste") else comecarCaminhada()
+            }
+            FaseDoTeste.CAMERA_FACIL -> {
+                cancelarVerificacao()
+                zerarAnel()
+                adiarVigia()
+            }
+            FaseDoTeste.FRASES -> {
+                cancelarVerificacao()
+                _olhado.value = verificacaoEm(alarme, tempos())
+                _metadeVerificada.value = false
+                iniciarVerificacao()
+            }
+            FaseDoTeste.CAMERA_EXIGENTE -> {
+                cancelarVerificacao()
+                _olhado.value = maxOf(_olhado.value, verificacaoEm(alarme, tempos()))
+                _metadeVerificada.value = true
+                adiarVigia()
+            }
+        }
+    }
+
+    /** A verificação em curso para (sem zerar nada): os sons e as frases atrasados não valem mais. */
+    private fun cancelarVerificacao() {
+        rodadaVerificacao++
+        handler.removeCallbacks(silencio)
+        handler.removeCallbacks(vigia)
+        _verificacao.value = null
+    }
+
+    /**
+     * Do prazo ou da caminhada de volta pra conversa (só nos testes): a caminhada para, o tempo de conversa zera e a
+     * IA recomeça. O modelo já saiu da memória no fim da conversa (e pode ainda estar anotando, uns 10 s): carrega de
+     * novo, lê a instrução de novo (uns 9 s) e abre; isso passa dos 20 s de uma fala comum ([RESPOSTA_IA_MAX_MS]),
+     * então a abertura tem o prazo dela, [VOLTA_MAX_MS]. Enquanto isso, a tela mostra "Thinking…"; sem a abertura no
+     * prazo, a caminhada de novo.
+     */
+    private fun voltarPraConversa() {
+        val alarme = _tocando.value ?: return
+        handler.removeCallbacks(fimDasOndas)
+        handler.removeCallbacks(vigiaDaCaminhada)
+        sirene.ondas(false)
+        _caminhada.value = null
+        prazoAte = 0L
+        conversadoMs = 0
+        extras = 0
+        falhas = 0
+        transcricao.clear()
+        etapa = EtapaDaManha.CONVERSA
+        sirene.manterAcordado(true)
+        if (motor != null) return abrirConversa(null)
+        _conversa.value = Conversa(falaDaIa = "", suaVez = false, pensando = true, conversadoMs = 0, metaMs = metaDaConversa(alarme))
+        if (iaBloqueada || !MotorDaConversa.disponivel(this)) return terminarConversa("sem a IA pra voltar")
+        MotorDaConversa.preparar(this)
+        val rodada = rodadaConversa
+        var foi = false // a abertura e o prazo dela chegando os dois: só o primeiro vale
+        val chegou: (String?) -> Unit = { fala ->
+            if (rodada == rodadaConversa && etapa == EtapaDaManha.CONVERSA && !foi) {
+                foi = true
+                if (fala == null) terminarConversa("a IA não voltou em ${VOLTA_MAX_MS / 1000} s") else abrirConversa(fala)
+            }
+        }
+        handler.postDelayed({ chegou(null) }, VOLTA_MAX_MS)
+        Noticias.buscar { manchetes, metas ->
+            if (rodada != rodadaConversa || etapa != EtapaDaManha.CONVERSA || foi) return@buscar
+            val ia = criarMotor(manchetes, metas) ?: return@buscar chegou(null)
+            ia.abrir(chegou)
+        }
+    }
 
     /** Sinal de "andando" da etapa da caminhada: guarda o tempo andado e a contagem pro bipe recomeça. */
     private fun andou(andadoMs: Long) {
@@ -1415,6 +1634,7 @@ class AlarmeService : Service() {
         falhas = 0
         andado = 0
         prazoAte = 0
+        transcricao.clear()
     }
 
     /**
@@ -1429,7 +1649,7 @@ class AlarmeService : Service() {
             esquecerManha()
         }
         _conversa.value = _conversa.value?.copy(metaMs = metaDaConversa(alarme))
-        _caminhada.value = _caminhada.value?.copy(metaMs = metaCaminhada(alarme))
+        _caminhada.value = _caminhada.value?.copy(metaMs = metaCaminhada(alarme, tempos()))
     }
 
     /** Missão cumprida (ou DESLIGAR, em alarme sem missão): o único fim do alarme. A limpeza acontece em [onDestroy]. */

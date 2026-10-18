@@ -27,15 +27,10 @@ import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Tempo andando pra desligar o alarme com caminhada: parado, o relógio não anda. */
-const val CAMINHADA_MS = 16 * 60_000L
-
-/** No botão "Test talk + walk", 3 min: dá pra sentir a regra do GPS andando de verdade (8 min era insuportável). */
+/** No botão "Test talk + walk", 3 min andando: dá pra sentir a regra do GPS andando de verdade (8 min era insuportável). */
 const val CAMINHADA_TESTE_MS = 3 * 60_000L
 
-/** Depois da conversa, o prazo pra se vestir e sair de casa: andar nele já conta, e parado não bipa. */
-const val PRAZO_SAIR_MS = 4 * 60_000L
-
+/** No teste, o prazo pra se vestir e sair de casa (andar nele já conta, e parado não bipa) é só isto. */
 const val PRAZO_SAIR_TESTE_MS = 30_000L
 
 /**
@@ -164,11 +159,11 @@ private const val PARADO_VELOCIDADE = 0.4f
 
 private const val RAIO_DA_TERRA_M = 6_371_000.0
 
-/** Quanto tempo andando a caminhada do [alarme] pede. */
-fun metaCaminhada(alarme: Alarme): Long = if (alarme.deTeste) CAMINHADA_TESTE_MS else CAMINHADA_MS
+/** Quanto tempo andando a caminhada do [alarme] pede: o dos [tempos] (de começo, 10 min); no teste, [CAMINHADA_TESTE_MS]. */
+fun metaCaminhada(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (alarme.deTeste) CAMINHADA_TESTE_MS else minutos(tempos.caminhadaMin)
 
-/** O prazo pra sair de casa do [alarme], depois da conversa. */
-fun prazoSair(alarme: Alarme): Long = if (alarme.deTeste) PRAZO_SAIR_TESTE_MS else PRAZO_SAIR_MS
+/** O prazo pra sair de casa do [alarme], depois da conversa: o dos [tempos] (de começo, 4 min); no teste, [PRAZO_SAIR_TESTE_MS]. */
+fun prazoSair(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (alarme.deTeste) PRAZO_SAIR_TESTE_MS else minutos(tempos.prepararMin)
 
 /**
  * Um fixo do GPS, sem o Location do Android (pra testar): [tempoMs] no relógio que não pula

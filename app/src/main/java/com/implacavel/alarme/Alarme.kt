@@ -8,12 +8,12 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** Volume do alarme tocando: começa em [inicio] e sobe em linha reta até [fim] em [ms] (frações do volume de alarme do celular). */
-class Subida(val inicio: Float, val fim: Float, val ms: Long)
+data class Subida(val inicio: Float, val fim: Float, val ms: Long)
 
 /**
- * Alarme e teste: de 10% a 40% em 30 s, exato (mesmo com o celular mais alto). É música, pra ouvir um
- * pouco antes de acordar, e o teste é feito em casa, com a família por perto. O dono pediu; não há
- * mais opção de volume forte.
+ * Alarme e teste, de começo: de 10% a 40% em 30 s, exato (mesmo com o celular mais alto). É música, pra ouvir um
+ * pouco antes de acordar, e o teste é feito em casa, com a família por perto. O dono muda o começo e o fim nos
+ * ajustes ([Tempos]); a subida de cada alarme fica gravada nele quando toca ([EmAndamento.subida]).
  */
 val SUBIDA_ALARME = Subida(0.10f, 0.40f, 30_000)
 
@@ -36,9 +36,9 @@ const val VOLUME_DA_VOZ = 0.30f
  * @property missao só desliga dizendo STOP e olhando pra câmera de olhos abertos (veja Missao.kt).
  * @property remedio lembrete de remédio: toca um toque suave do app em vez da música, subindo como
  *   [SUBIDA_REMEDIO].
- * @property caminhada despertador "conversa + caminhada": depois do STOP, 10 min de conversa com a IA do
- *   celular, 4 min pra sair e 16 min andando na rua, chova ou faça sol (sem a IA, direto pra caminhada). Sem ele, o
- *   despertador é o "câmera + frases". Só vale com [missao].
+ * @property caminhada despertador "conversa + caminhada": depois do STOP, a conversa com a IA do celular, o prazo pra
+ *   sair e a caminhada na rua, chova ou faça sol (sem a IA, direto pra caminhada); os tempos são os dos ajustes
+ *   ([Tempos]: de começo 10, 4 e 10 min). Sem ele, o despertador é o "câmera + frases". Só vale com [missao].
  * @property som o som deste alarme: o nome de um arquivo da biblioteca ([Sons]); null = o padrão da biblioteca (ou,
  *   sem padrão, o toque de alarme do celular). O remédio não usa: toca o toque suave do app.
  */
@@ -127,10 +127,12 @@ data class Alarme(
 /**
  * O alarme que tocou e ainda não foi cumprido, com tudo pra ele voltar igual se o app morrer: o
  * [alarme] como estava, quando tocou ([desde], epoch em ms), a [musica] (URI: o som da biblioteca que o alarme
- * toca, [Sons.uriDoAlarme]; null = o toque do celular) e o [volume] de alarme de antes (a Sirene o devolve no fim;
- * veja [volumeAgora]). Editar o alarme, trocar o som ou abaixar o volume depois não muda nada.
+ * toca, [Sons.uriDoAlarme]; null = o toque do celular), o [volume] de alarme de antes (a Sirene o devolve no fim;
+ * veja [volumeAgora]) e os [tempos] dos ajustes na hora em que tocou (a subida do volume da música e quanto cada etapa
+ * pede). Editar o alarme, trocar o som, mexer nos ajustes ou abaixar o volume depois não muda nada: mexer nos ajustes
+ * com o alarme tocando encurtaria a missão, e isso seria uma saída.
  */
-data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?, val volume: Int) {
+data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?, val volume: Int, val tempos: Tempos = TEMPOS_PADRAO) {
     /**
      * Outro alarme disparou no meio, [agora] (epoch em ms), com a música dele ([musicaDoOutro]). Teste no meio de um
      * alarme não muda nada. Alarme de verdade no meio do teste toma o lugar dele, com as regras e a música dele (a
@@ -152,10 +154,11 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
     }
 
     /**
-     * Volume de alarme em [agoraMs] (epoch), numa escala até [maximo], pela [Subida] do alarme
-     * ([SUBIDA_ALARME] ou [SUBIDA_REMEDIO]) desde que tocou ([desde]); no fim dela, fica lá. Depois de o app
-     * cair, continua de onde estava. Relógio que voltou (antes de [desde]) conta como subida feita: o
-     * volume só sobe. A Sirene põe o volume nele no começo e não deixa abaixar dele (subir pode).
+     * Volume de alarme em [agoraMs] (epoch), numa escala até [maximo], pela subida do alarme ([subida]: a dos
+     * [tempos] gravados; no remédio, [SUBIDA_REMEDIO]; num teste, [SUBIDA_ALARME], a de sempre, pra um teste em casa
+     * nunca tocar alto) desde que tocou ([desde]); no fim dela, fica lá. Depois de o app cair, continua de onde estava.
+     * Relógio que voltou (antes de [desde]) conta como subida feita: o volume só sobe. A Sirene põe o volume nele no
+     * começo e não deixa abaixar dele (subir pode).
      */
     fun volumeAgora(maximo: Int, agoraMs: Long): Int {
         val s = subida
@@ -164,8 +167,16 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
         return (maximo * (s.inicio + (s.fim - s.inicio) * subiu)).roundToInt()
     }
 
-    /** Volume dos sons de aviso (bipe positivo, plim, parabéns): o do fim da subida (40%), sempre, mesmo que a subida não tenha acabado. */
+    /** Volume dos sons de aviso (bipe positivo, plim, parabéns): o do fim da subida (de começo, 40%), sempre, mesmo que a subida não tenha acabado. */
     fun volumeDosAvisos(maximo: Int): Int = (maximo * subida.fim).roundToInt()
+
+    /** A subida do volume deste alarme (veja [volumeAgora]). */
+    val subida: Subida
+        get() = when {
+            alarme.remedio -> SUBIDA_REMEDIO
+            alarme.deTeste -> SUBIDA_ALARME
+            else -> tempos.subida
+        }
 
     /**
      * Volume da voz do app: o degrau do volume de alarme logo acima da [fracao] do máximo (a escolhida na tela
@@ -180,12 +191,11 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
      */
     fun ganhoDaVoz(maximo: Int, fracao: Float = VOLUME_DA_VOZ): Float = (maximo * fracao / volumeDaVoz(maximo, fracao)).coerceIn(0.05f, 1f)
 
-    private val subida get() = if (alarme.remedio) SUBIDA_REMEDIO else SUBIDA_ALARME
-
     fun paraJson(): JSONObject = JSONObject()
         .put("alarme", alarme.paraJson())
         .put("desde", desde)
         .put("volume", volume)
+        .put("tempos", tempos.paraJson())
         .apply { if (musica != null) put("musica", musica) }
 
     companion object {
@@ -194,6 +204,8 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
             desde = o.getLong("desde"),
             musica = if (o.has("musica")) o.getString("musica") else null,
             volume = o.getInt("volume"),
+            // Gravação de antes dos ajustes: os tempos de sempre
+            tempos = o.optJSONObject("tempos")?.let(Tempos::deJson) ?: TEMPOS_PADRAO,
         )
     }
 }

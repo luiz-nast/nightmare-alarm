@@ -38,7 +38,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -252,7 +254,8 @@ fun rememberSentidosDaCaminhada(ligado: Boolean): SentidosDaCaminhada {
  * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada
  * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. [onDefeito] só num
  * celular sem GPS nenhum, pra um defeito não prender ninguém (como a câmera que não abre).
- * [onConcluiu] uma vez, com o anel completo. Com [detalhar] (o TesteDoGps), sem prazo nem bipe.
+ * [onConcluiu] uma vez, com o anel completo. Com [detalhar] (o TesteDoGps), sem prazo nem bipe. No prazo, o botão
+ * das ondas ([ondasMudas], [onOndas]): quem não quer ouvir o mar emudece, e fica assim nas próximas manhãs.
  */
 @Composable
 fun EtapaCaminhada(
@@ -265,6 +268,8 @@ fun EtapaCaminhada(
     onDefeito: () -> Unit,
     onConcluiu: () -> Unit,
     detalhar: Boolean = false,
+    ondasMudas: Boolean = false,
+    onOndas: ((ligadas: Boolean) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
@@ -341,6 +346,12 @@ fun EtapaCaminhada(
         // Sempre presente, pra tela não pular: o prazo pra sair ou, depois dele, a barra do bipe
         if (noPrazo != null) {
             Text(noPrazo, color = AzulCaminhada, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            // As ondas do mar tocam no prazo: quem não quer, emudece (e fica assim nas próximas manhãs)
+            if (onOndas != null) {
+                TextButton(onClick = { onOndas(ondasMudas) }, colors = ButtonDefaults.textButtonColors(contentColor = AzulCaminhada)) {
+                    Text(if (ondasMudas) "🔇 Waves off · tap to turn on" else "🌊 Waves on · tap to mute", fontSize = 15.sp)
+                }
+            }
         } else {
             BarraDoBipe(paradoMs)
         }

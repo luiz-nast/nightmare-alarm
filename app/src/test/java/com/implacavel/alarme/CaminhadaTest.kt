@@ -447,13 +447,19 @@ class CaminhadaTest {
     }
 
     @Test
-    fun caminhada16MinutosEPrazo4ETeste3Minutos() {
+    fun caminhadaEPrazoSeguemOsAjustesETeste3Minutos() {
         val alarme = Alarme(1, 7, 0, caminhada = true)
         val teste = Alarme.teste(caminhada = true)
-        assertEquals(16 * 60_000L, metaCaminhada(alarme))
-        assertEquals(3 * 60_000L, metaCaminhada(teste))
+        // De começo: 10 min andando (era 16: o dono pediu 10 em 10-18) e 4 pra sair
+        assertEquals(10 * 60_000L, metaCaminhada(alarme))
         assertEquals(4 * 60_000L, prazoSair(alarme))
-        assertEquals(30_000L, prazoSair(teste))
+        // O dono mexeu: 30 min andando, sem prazo (os bipes de parado contam já)
+        val tempos = Tempos(caminhadaMin = 30, prepararMin = 0)
+        assertEquals(30 * 60_000L, metaCaminhada(alarme, tempos))
+        assertEquals(0L, prazoSair(alarme, tempos))
+        // O teste não segue os ajustes
+        assertEquals(3 * 60_000L, metaCaminhada(teste, tempos))
+        assertEquals(30_000L, prazoSair(teste, tempos))
     }
 
     @Test
@@ -499,7 +505,7 @@ class CaminhadaTest {
     fun textosDaTela() {
         assertEquals("7:12", tempoAndado(432_999)) // o que já foi: não arredonda pra cima
         assertEquals("0:28", tempoAndado(28_400))
-        assertEquals("16:00", tempoAndado(CAMINHADA_MS))
+        assertEquals("16:00", tempoAndado(minutos(16)))
         assertEquals("1.3 m/s", textoDaVelocidade(1.34f))
         assertEquals("0.0 m/s", textoDaVelocidade(0f))
     }

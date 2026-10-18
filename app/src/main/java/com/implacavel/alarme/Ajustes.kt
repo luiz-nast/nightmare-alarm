@@ -11,10 +11,14 @@ import org.json.JSONObject
 /** A voz do app nunca fica abaixo disso: muda, a missão perderia as falas. */
 const val VOLUME_DA_VOZ_MIN = 0.10f
 
+/** O que o dono escreve sobre si pra IA ([Ajustes.sobreMim]) vai até esse tanto de letras (a IA lê tudo antes de falar). */
+const val SOBRE_MIM_MAX_LETRAS = 600
+
 /**
- * Ajustes e estado que precisam sobreviver ao processo: o volume da voz e o alarme em andamento (e onde a missão dele
- * está). Gravado em [prefsProtegidas], como os alarmes. Os sons ficam em [Sons] (a música única de antes, "musicaUri",
- * é migrada pra lá).
+ * Ajustes e estado que precisam sobreviver ao processo: o volume da voz, os tempos dos despertadores ([Tempos]), as
+ * ondas mudas, o que o dono contou de si e o que a IA anotou dele ([memoriaDaIa]), e o alarme em andamento (e onde a
+ * missão dele está). Gravado em [prefsProtegidas], como os alarmes. Os sons ficam em [Sons] (a música única de antes,
+ * "musicaUri", é migrada pra lá).
  */
 object Ajustes {
     private lateinit var prefs: SharedPreferences
@@ -33,7 +37,7 @@ object Ajustes {
 
     /**
      * Volume de alarme de antes de um alarme que já foi cumprido mas ainda está comemorando (os sons do
-     * fim tocam a 40%). Gravado antes de apagar o [emAndamento]: se o app morrer na comemoração, o [App]
+     * fim tocam no fim da subida). Gravado antes de apagar o [emAndamento]: se o app morrer na comemoração, o [App]
      * devolve o volume ao voltar, e um alarme que dispare nesse meio guarda este como o "de antes".
      */
     var volumeParaDevolver: Int?
@@ -59,7 +63,7 @@ object Ajustes {
 
     private val _volumeDaVoz = MutableStateFlow(VOLUME_DA_VOZ)
 
-    /** Volume da voz do app, de 0,1 a 1 do volume de alarme, escolhido na tela principal (Ajustes ▾). De começo, [VOLUME_DA_VOZ]. */
+    /** Volume da voz do app, de 0,1 a 1 do volume de alarme, escolhido na tela principal (Settings). De começo, [VOLUME_DA_VOZ]. */
     val volumeDaVozAgora: StateFlow<Float> = _volumeDaVoz.asStateFlow()
     val volumeDaVoz: Float get() = _volumeDaVoz.value
 
@@ -69,9 +73,79 @@ object Ajustes {
         _volumeDaVoz.value = valor
     }
 
+    private val _tempos = MutableStateFlow(TEMPOS_PADRAO)
+
+    /** Os tempos e o volume da música dos despertadores ([Tempos]), escolhidos na tela principal (Settings). */
+    val tempos: StateFlow<Tempos> = _tempos.asStateFlow()
+
+    fun escolherTempos(novos: Tempos) {
+        val t = novos.ajustado()
+        prefs.edit {
+            putFloat("volumeInicio", t.volumeInicio)
+            putFloat("volumeFim", t.volumeFim)
+            putInt("cameraFacilMin", t.cameraFacilMin)
+            putInt("frases", t.frases)
+            putInt("cameraDificilMin", t.cameraDificilMin)
+            putInt("conversaMin", t.conversaMin)
+            putInt("prepararMin", t.prepararMin)
+            putInt("caminhadaMin", t.caminhadaMin)
+        }
+        _tempos.value = t
+    }
+
+    private val _ondasMudas = MutableStateFlow(false)
+
+    /** O som de ondas do prazo pra sair fica mudo (o botão na tela da caminhada): vale até o dono ligar de novo. */
+    val ondasMudasAgora: StateFlow<Boolean> = _ondasMudas.asStateFlow()
+    val ondasMudas: Boolean get() = _ondasMudas.value
+
+    fun emudecerOndas(mudas: Boolean) {
+        prefs.edit { putBoolean("ondasMudas", mudas) }
+        _ondasMudas.value = mudas
+    }
+
+    private val _sobreMim = MutableStateFlow("")
+
+    /** O que o dono contou de si pra IA da manhã (Settings › "About you"): quem é, o que quer, do que gosta. Vai inteiro na instrução dela. */
+    val sobreMim: StateFlow<String> = _sobreMim.asStateFlow()
+
+    fun escreverSobreMim(texto: String) {
+        val valor = texto.take(SOBRE_MIM_MAX_LETRAS)
+        prefs.edit { putString("sobreMim", valor) }
+        _sobreMim.value = valor
+    }
+
+    private val _memoriaDaIa = MutableStateFlow("")
+
+    /**
+     * O que a IA anotou do dono nas conversas de antes ([limparAnotacoes]): no fim de cada conversa ela reescreve as
+     * notas, e na manhã seguinte lê. O dono vê e apaga nos ajustes ("What the AI remembers").
+     */
+    val memoriaDaIa: StateFlow<String> = _memoriaDaIa.asStateFlow()
+
+    fun guardarMemoriaDaIa(texto: String) {
+        val valor = limparAnotacoes(texto)
+        prefs.edit { putString("memoriaDaIa", valor) }
+        _memoriaDaIa.value = valor
+    }
+
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
         prefs = ctx.prefsProtegidas("ajustes")
         _volumeDaVoz.value = prefs.getFloat("volumeDaVoz", VOLUME_DA_VOZ).coerceIn(VOLUME_DA_VOZ_MIN, 1f)
+        val p = TEMPOS_PADRAO
+        _tempos.value = Tempos(
+            volumeInicio = prefs.getFloat("volumeInicio", p.volumeInicio),
+            volumeFim = prefs.getFloat("volumeFim", p.volumeFim),
+            cameraFacilMin = prefs.getInt("cameraFacilMin", p.cameraFacilMin),
+            frases = prefs.getInt("frases", p.frases),
+            cameraDificilMin = prefs.getInt("cameraDificilMin", p.cameraDificilMin),
+            conversaMin = prefs.getInt("conversaMin", p.conversaMin),
+            prepararMin = prefs.getInt("prepararMin", p.prepararMin),
+            caminhadaMin = prefs.getInt("caminhadaMin", p.caminhadaMin),
+        ).ajustado()
+        _ondasMudas.value = prefs.getBoolean("ondasMudas", false)
+        _sobreMim.value = prefs.getString("sobreMim", "").orEmpty().take(SOBRE_MIM_MAX_LETRAS)
+        _memoriaDaIa.value = limparAnotacoes(prefs.getString("memoriaDaIa", "").orEmpty())
     }
 }

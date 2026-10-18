@@ -5,15 +5,17 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.time.LocalTime
 
-/** Regras da conversa da manhã (RegrasConversa.kt) e as notícias. */
+/** Regras da conversa da manhã (RegrasConversa.kt), as notícias e a busca que a IA pede (Pesquisa.kt). */
 class ConversaTest {
 
     @Test
-    fun conversaPede10MinutosETeste5() {
-        assertEquals(10 * 60_000L, metaConversa(Alarme(1, 7, 0, caminhada = true)))
-        assertEquals(3 * 60_000L, metaConversa(Alarme.teste(caminhada = true)))
+    fun conversaPedeOsMinutosDosAjustesETeste3() {
+        assertEquals(10 * 60_000L, metaConversa(Alarme(1, 7, 0, caminhada = true))) // de começo
+        assertEquals(25 * 60_000L, metaConversa(Alarme(1, 7, 0, caminhada = true), Tempos(conversaMin = 25)))
+        assertEquals(3 * 60_000L, metaConversa(Alarme.teste(caminhada = true), Tempos(conversaMin = 25))) // o teste não segue os ajustes
         assertEquals(3 * 60_000L, extraDaConversa(Alarme(1, 7, 0, caminhada = true)))
         assertEquals(20_000L, extraDaConversa(Alarme.teste(caminhada = true)))
     }
@@ -102,13 +104,116 @@ class ConversaTest {
     }
 
     @Test
-    fun falaDaIaFicaSoComAPergunta() {
-        // A explicação que ela emenda depois da pergunta não vai pra voz
-        assertEquals("Nice, what are you training today, sir?", limparFala("Nice, what are you training today, sir? I love the gym. It keeps you sharp."))
-        assertEquals("Not my call, sir. What is the first thing you will do today?", soAPergunta("Not my call, sir. What is the first thing you will do today? Tell me."))
-        // Um "What?" sozinho no começo não é a pergunta inteira
-        assertEquals("What? Why did you skip it?", soAPergunta("What? Why did you skip it? That's a shame."))
-        assertEquals("Good morning, sir.", soAPergunta("Good morning, sir."))
+    fun falaDaIaVaiInteiraSemAFraseCortadaNoFim() {
+        // Tudo o que ela disse vai pra voz (antes, só a primeira pergunta: o dono achou a IA só perguntando, sem contar nada)
+        assertEquals(
+            "Nice, what are you training today, sir? I love the gym. It keeps you sharp.",
+            limparFala("Nice, what are you training today, sir? I love the gym. It keeps you sharp."),
+        )
+        // Bateu no teto de tokens no meio de uma frase: fica até a última frase inteira
+        assertEquals("Start with an Arduino kit, sir. In one weekend you blink an LED.", ateAUltimaFrase("Start with an Arduino kit, sir. In one weekend you blink an LED. Then you can read a"))
+        assertEquals("Good morning, sir!", ateAUltimaFrase("Good morning, sir! The coffee price went up because"))
+        // Sem nenhuma frase inteira (ou curta demais), vai como está
+        assertEquals("Not my call", ateAUltimaFrase("Not my call"))
+        assertEquals("Yes. The coffee went up because", ateAUltimaFrase("Yes. The coffee went up because"))
+        assertEquals("Good morning, sir.", limparFala("Good morning, sir."))
+    }
+
+    @Test
+    fun aIaPedeBuscaNumaLinhaSo() {
+        assertEquals("coffee price rise Brazil", consultaDaBusca("SEARCH: coffee price rise Brazil"))
+        assertEquals("who invented the transistor", consultaDaBusca("  search: \"who invented the transistor\". "))
+        assertEquals("Arduino starter kit", consultaDaBusca("- Search: Arduino starter kit\nI will check."))
+        // O chute do modelo emendado na consulta fica de fora (10-18: "…transistor: Alexander Fleming invented…")
+        assertEquals("who invented the transistor", consultaDaBusca("SEARCH: who invented the transistor: Alexander Fleming invented the transistor in 1947 a"))
+        assertEquals("coffee price Brazil", consultaDaBusca("SEARCH: coffee price Brazil. It rose 30% this year"))
+        assertEquals(CONSULTA_MAX_PALAVRAS, consultaDaBusca("SEARCH: " + "w ".repeat(30))!!.split(" ").size)
+        assertNull(consultaDaBusca("I would search for that, sir. What do you think?"))
+        assertNull(consultaDaBusca("SEARCH:"))
+        assertNull(consultaDaBusca(""))
+        assertEquals(CONSULTA_MAX_LETRAS, consultaDaBusca("SEARCH: " + "a".repeat(200))!!.length)
+        // O que volta pra IA: o resultado (cortado) e a ordem de não citar a busca; sem resultado, responde com o que sabe
+        val com = pedidoComResultado("coffee price", "Coffee: " + "x".repeat(2_000), pergunta = "Why is coffee so expensive?")
+        assertTrue(com.startsWith("[Search result for \"coffee price\":"))
+        assertTrue(com.contains("He asked: \"Why is coffee so expensive?\". Now answer exactly that"))
+        assertTrue(com.contains("Do not mention the search"))
+        assertTrue(com.length < RESULTADO_MAX_LETRAS + 400)
+        assertTrue(pedidoComResultado("coffee price", null).contains("Nothing was found"))
+        assertTrue(pedidoComResultado("coffee price", "  ").contains("Nothing was found"))
+        // A pergunta dele sem as linhas do app entre colchetes; sem pergunta, só "answer him"
+        assertTrue(pedidoComResultado("x", "r", "[He did not hear your last reply. Answer this instead:]\nWho made it?").contains("He asked: \"Who made it?\""))
+        assertTrue(pedidoComResultado("x", "r", "").contains("Now answer him in plain speech"))
+    }
+
+    @Test
+    fun resultadoDaBuscaJuntaWikipediaENoticias() {
+        // O começo de cada artigo (pages) mais o trecho onde a busca bateu (search), em HTML
+        val json = """{"batchcomplete":true,"query":{
+            "search":[{"ns":0,"title":"Transistor","pageid":1,"snippet":"The first working <span class=\"searchmatch\">transistor</span> was invented in 1947 by Bardeen &amp; Brattain"}],
+            "pages":[
+            {"pageid":2,"ns":0,"title":"Second","index":2,"extract":"Second article.\nMore."},
+            {"pageid":1,"ns":0,"title":"Transistor","index":1,"extract":"A transistor is a semiconductor device."},
+            {"pageid":3,"ns":0,"title":"Empty","index":3,"extract":"  "}]}}"""
+        assertEquals(
+            listOf("Transistor: …The first working transistor was invented in 1947 by Bardeen & Brattain… A transistor is a semiconductor device.", "Second: Second article. More."),
+            trechosDaWikipedia(json),
+        )
+        // Cada artigo até TRECHO_MAX_LETRAS
+        val longo = """{"query":{"pages":[{"title":"L","index":1,"extract":"${"x".repeat(1_000)}"}]}}"""
+        assertEquals(TRECHO_MAX_LETRAS + 3, trechosDaWikipedia(longo).single().length)
+        // Só o começo, quando o trecho é o próprio começo
+        val igual = """{"query":{"search":[{"title":"T","snippet":"A <b>transistor</b> is a semiconductor device."}],"pages":[{"title":"T","index":1,"extract":"A transistor is a semiconductor device."}]}}"""
+        assertEquals(listOf("T: A transistor is a semiconductor device."), trechosDaWikipedia(igual))
+        assertTrue(trechosDaWikipedia("{\"batchcomplete\":true}").isEmpty()) // nada achado: sem "query"
+        assertTrue(trechosDaWikipedia("<html>erro</html>").isEmpty())
+        val texto = resultadoDaBusca(listOf("Transistor: A semiconductor device."), listOf("Chip makers rise - Reuters", "New transistor record - Nature"))
+        assertEquals("Transistor: A semiconductor device.\nRecent news:\n- Chip makers rise\n- New transistor record", texto)
+        assertEquals("Recent news:\n- Only news", resultadoDaBusca(emptyList(), listOf("Only news - g1")))
+        assertNull(resultadoDaBusca(emptyList(), emptyList()))
+        assertEquals(RESULTADO_MAX_LETRAS, resultadoDaBusca(listOf("W: " + "x".repeat(3_000)), emptyList())!!.length)
+        assertTrue(enderecoDaWikipedia("coffee price").contains("gsrsearch=coffee+price"))
+        assertTrue(enderecoDasNoticias("coffee price").contains("q=coffee+price"))
+    }
+
+    @Test
+    fun anotacoesDaIaFicamLimpasECurtas() {
+        val cruas = "* Wants to learn electronics (Oct 17)\n- **Bought an Arduino kit** (Oct 18)\n\n  Works as a nurse (Oct 17)  \n"
+        assertEquals("Wants to learn electronics (Oct 17)\nBought an Arduino kit (Oct 18)\nWorks as a nurse (Oct 17)", limparAnotacoes(cruas))
+        assertEquals(MEMORIA_MAX_LINHAS, limparAnotacoes((1..30).joinToString("\n") { "fato $it" }).lines().size)
+        assertTrue(limparAnotacoes("x".repeat(5_000)).length <= MEMORIA_MAX_LETRAS)
+        assertEquals("", limparAnotacoes("  \n \n"))
+    }
+
+    @Test
+    fun anotacoesAntigasQueOModeloEsqueceuVoltam() {
+        val antigas = "Wants to learn electronics, considering an Arduino kit (Oct 17)\nWorks with software (Oct 17)\nGoes to the gym after work (Oct 17)"
+        val novas = "- Bought an Arduino kit yesterday (Oct 18)\n- Works with software. (Oct 18)\n- Asked who invented the transistor (Oct 18)"
+        assertEquals(
+            "Bought an Arduino kit yesterday (Oct 18)\nWorks with software. (Oct 18)\nAsked who invented the transistor (Oct 18)\n" +
+                "Wants to learn electronics, considering an Arduino kit (Oct 17)\nGoes to the gym after work (Oct 17)",
+            juntarAnotacoes(antigas, novas),
+        )
+        // Sem novas (o modelo falhou), ficam as antigas; sem antigas, só as novas; nunca mais que o teto de linhas
+        assertEquals(limparAnotacoes(antigas), juntarAnotacoes(antigas, "  "))
+        assertEquals("Only new (Oct 18)", juntarAnotacoes("", "Only new (Oct 18)"))
+        assertEquals(MEMORIA_MAX_LINHAS, juntarAnotacoes((1..9).joinToString("\n") { "old fact $it" }, (1..9).joinToString("\n") { "new fact $it" }).lines().size)
+    }
+
+    @Test
+    fun pedidoDeAnotacoesLevaAsAntigasEAConversaDeHoje() {
+        val transcricao = listOf(Turno(daIa = true, texto = "Good morning, sir! How did the Arduino kit go?"), Turno(daIa = false, texto = "I bought it yesterday"))
+        val pedido = pedidoDeAnotacoes("Wants to learn electronics (Oct 17)", transcricao, LocalDate.of(2026, 10, 18))
+        assertTrue(pedido.contains("Today is Sunday, October 18, 2026."))
+        assertTrue(pedido.contains("Old notes:\nWants to learn electronics (Oct 17)"))
+        assertTrue(pedido.contains("You: Good morning, sir! How did the Arduino kit go?\nHe: I bought it yesterday"))
+        assertTrue(pedido.contains("like (Oct 18)"))
+        assertTrue(pedidoDeAnotacoes("", transcricao, LocalDate.of(2026, 10, 18)).contains("Old notes:\n(none)"))
+        // Conversa longa: ficam as últimas falas, até o limite
+        val longa = (1..100).map { Turno(daIa = it % 2 == 0, texto = "fala $it " + "palavra ".repeat(20)) }
+        val cortado = pedidoDeAnotacoes("", longa, LocalDate.of(2026, 10, 18))
+        assertFalse(cortado.contains("fala 1 "))
+        assertTrue(cortado.contains("fala 100 "))
+        assertTrue(cortado.length < TRANSCRICAO_MAX_LETRAS + 1_000)
     }
 
     @Test
@@ -122,12 +227,19 @@ class ConversaTest {
     }
 
     @Test
-    fun aberturaPerguntaDaPrimeiraManchete() {
-        val pedido = pedidoDeAbertura(listOf("Preço do café sobe 30% no ano - g1", "Dólar cai - Folha"))
+    fun aberturaRetomaAsAnotacoesOuContaDaPrimeiraManchete() {
+        val manchetes = listOf("Preço do café sobe 30% no ano - g1", "Dólar cai - Folha")
+        val pedido = pedidoDeAbertura(manchetes)
         assertTrue(pedido.contains("\"Preço do café sobe 30% no ano\""))
+        assertTrue(pedido.contains("tell him in one simple sentence what this headline is about"))
         assertFalse(pedido.contains("g1"))
         assertFalse(pedido.contains("Dólar"))
         assertTrue(pedidoDeAbertura(emptyList()).contains("his plans for today"))
+        // Com anotações das manhãs de antes, abre retomando uma coisa dele (a manchete fica pra depois)
+        val comMemoria = pedidoDeAbertura(manchetes, memoria = "Wants to learn electronics (Oct 17)")
+        assertTrue(comMemoria.contains("follow up on one thing from your notes"))
+        assertFalse(comMemoria.contains("café"))
+        assertEquals(pedido, pedidoDeAbertura(manchetes, memoria = "  "))
     }
 
     @Test
@@ -215,9 +327,22 @@ class ConversaTest {
         assertTrue(instrucao.contains("2. Dólar cai - g1"))
         assertTrue(instrucao.contains("Correr 3x por semana"))
         assertTrue(instrucao.contains("Not my call, sir."))
-        assertTrue(instrucao.contains("Stay on the same subject"))
+        assertTrue(instrucao.contains("Stay on the subject while it is alive"))
         assertTrue(instrucao.contains("Change the subject only when it has died"))
-        assertTrue(instrucao.contains("ONE short, direct question, 15 words at most"))
+        // Conta coisas antes de perguntar, responde o que ele pergunta e pode pedir busca
+        assertTrue(instrucao.contains("Two to four short sentences, 40 words at most"))
+        assertTrue(instrucao.contains("Never reply with only a question"))
+        assertTrue(instrucao.contains("never by judging what he said"))
+        assertTrue(instrucao.contains("SEARCH: <his question in 3 to 8 plain words>"))
+        assertTrue(instrucao.contains("never your own guess of the answer"))
+        assertFalse(instrucao.contains("About him"))
+        assertFalse(instrucao.contains("Your notes from earlier mornings"))
+        // O que ele contou de si e as anotações das manhãs de antes
+        val comEle = instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), sobreEle = "I'm Luiz, I work with software.", memoria = "Wants to learn electronics (Oct 17)")
+        assertTrue(comEle.contains("About him, in his own words:\nI'm Luiz, I work with software."))
+        assertTrue(comEle.contains("Your notes from earlier mornings (the date is when you learned it):\nWants to learn electronics (Oct 17)"))
+        assertEquals(SOBRE_MIM_MAX_LETRAS, instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), sobreEle = "§".repeat(5_000)).count { it == '§' })
+        assertEquals(MEMORIA_MAX_LETRAS, instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), memoria = "§".repeat(5_000)).count { it == '§' })
         // Sem notícias nem metas
         val vazia = instrucaoDoTreinador(emptyList(), "  ", LocalTime.of(14, 5))
         assertTrue(vazia.contains("2:05 PM"))

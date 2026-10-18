@@ -6,10 +6,7 @@ import java.text.Normalizer
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-/** Tempo olhando pra câmera, de olhos abertos, pra desligar o alarme. */
-const val META_OLHAR_MS = 40 * 60_000L
-
-/** No botão "Testar câmera + frases" a câmera pede só isto: teste tem que ser rápido. */
+/** No botão "Testar câmera + frases" a câmera pede só isto (metade fácil, metade exigente): teste tem que ser rápido. */
 const val META_OLHAR_TESTE_MS = 30_000L
 
 /**
@@ -30,8 +27,14 @@ val BIPES_ATE_ZERAR = ((DESISTENCIA_MS - 1) / AVISO_SEM_OLHAR_MS).toInt()
 /** O que a câmera está vendo agora. */
 enum class Leitura { SEM_CAMERA, SEM_ROSTO, OLHOS_FECHADOS, OLHANDO }
 
-/** Quanto tempo de olhos abertos a missão do [alarme] pede. */
-fun metaOlhar(alarme: Alarme): Long = if (alarme.deTeste) META_OLHAR_TESTE_MS else META_OLHAR_MS
+/** Quanto tempo de olhos abertos a missão do [alarme] pede: o modo fácil mais o exigente dos [tempos] (de começo, 20 + 20 min). */
+fun metaOlhar(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (alarme.deTeste) META_OLHAR_TESTE_MS else minutos(tempos.cameraMin)
+
+/**
+ * Com quanto tempo de olhos abertos vem a verificação do meio (e, depois dela, o modo exigente): o modo fácil dos
+ * [tempos] (de começo, 20 min); no teste, a metade.
+ */
+fun verificacaoEm(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (alarme.deTeste) META_OLHAR_TESTE_MS / 2 else minutos(tempos.cameraFacilMin)
 
 /** Aceita "stop" e jeitos de falar ou transcrever com sotaque ("estop", "istópi", "stopi"). */
 fun disseStop(texto: String): Boolean {
@@ -80,11 +83,50 @@ const val MARCO_MS = 10 * 60_000L
 
 /**
  * Marco de [MARCO_MS] completado quando o anel passou de [antesMs] pra [depoisMs], em minutos (10, 30),
- * ou null. A metade da [metaMs] não conta (aí vem a verificação), nem o fim (o alarme já desliga).
+ * ou null. O ponto da verificação ([verificacaoMs]) não conta (aí vem ela), nem o fim (o alarme já desliga).
  */
-fun marcoCompletado(antesMs: Long, depoisMs: Long, metaMs: Long): Int? {
+fun marcoCompletado(antesMs: Long, depoisMs: Long, metaMs: Long, verificacaoMs: Long = metaMs / 2): Int? {
     val marco = depoisMs / MARCO_MS * MARCO_MS
-    return if (marco > antesMs && marco in 1 until metaMs && marco != metaMs / 2) (marco / 60_000).toInt() else null
+    return if (marco > antesMs && marco in 1 until metaMs && marco != verificacaoMs) (marco / 60_000).toInt() else null
+}
+
+/**
+ * As fases que os botões "Back", "Cancel test" e "Next" da tela do alarme percorrem, só nos alarmes dos botões
+ * de teste: no "câmera + frases", câmera fácil, frases (se os ajustes pedem alguma) e câmera exigente; no "conversa +
+ * caminhada", conversa, prazo pra sair e caminhada. O serviço muda de fase ([AlarmeService.irPraFase]); a tela só diz
+ * em qual está ([faseDoTeste]).
+ */
+enum class FaseDoTeste(val rotulo: String) {
+    CAMERA_FACIL("Camera"), FRASES("Phrases"), CAMERA_EXIGENTE("Camera 2"),
+    CONVERSA("Talk"), PREPARO("Wait"), CAMINHADA("Walk");
+
+    /** As fases do teste a que esta pertence, na ordem; sem frases nos ajustes ([comFrases] false), a câmera vai direto da fácil pra exigente. */
+    fun fases(comFrases: Boolean = true): List<FaseDoTeste> = when {
+        this !in FASES_DA_CAMERA -> FASES_DA_CAMINHADA
+        comFrases -> FASES_DA_CAMERA
+        else -> FASES_DA_CAMERA - FRASES
+    }
+
+    fun anterior(comFrases: Boolean = true): FaseDoTeste? = fases(comFrases).let { it.getOrNull(it.indexOf(this) - 1) }
+    fun proxima(comFrases: Boolean = true): FaseDoTeste? = fases(comFrases).let { it.getOrNull(it.indexOf(this) + 1) }
+}
+
+val FASES_DA_CAMERA = listOf(FaseDoTeste.CAMERA_FACIL, FaseDoTeste.FRASES, FaseDoTeste.CAMERA_EXIGENTE)
+val FASES_DA_CAMINHADA = listOf(FaseDoTeste.CONVERSA, FaseDoTeste.PREPARO, FaseDoTeste.CAMINHADA)
+
+/**
+ * Em que fase do teste a tela do alarme está, pelo que o serviço mostra: [conversa] e [caminhada] são as etapas da
+ * manhã ([noPrazo] = ainda no prazo pra sair); [verificacao] e [metadeVerificada], as da câmera. Null fora das fases
+ * (a música, o bom dia, a comemoração).
+ */
+fun faseDoTeste(conversa: Boolean, caminhada: Boolean, noPrazo: Boolean, verificacao: Boolean, metadeVerificada: Boolean, naCamera: Boolean): FaseDoTeste? = when {
+    conversa -> FaseDoTeste.CONVERSA
+    caminhada && noPrazo -> FaseDoTeste.PREPARO
+    caminhada -> FaseDoTeste.CAMINHADA
+    verificacao -> FaseDoTeste.FRASES
+    naCamera && metadeVerificada -> FaseDoTeste.CAMERA_EXIGENTE
+    naCamera -> FaseDoTeste.CAMERA_FACIL
+    else -> null
 }
 
 /** Na verificação do meio, sem responder nada por esse tempo, um apito alto; a cada mais esse tempo, outro. */

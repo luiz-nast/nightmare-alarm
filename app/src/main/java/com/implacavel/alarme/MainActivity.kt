@@ -47,7 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 
-/** Tela principal, em duas páginas: os alarmes (à esquerda) e o resto (permissões, sons, testes e ajustes). */
+/** Tela principal, em duas páginas: os alarmes (à esquerda) e o resto (permissões, sons, testes, ajustes e a IA). */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +72,9 @@ private fun TelaPrincipal() {
     val sons by Sons.lista.collectAsStateWithLifecycle()
     val somPadrao by Sons.padrao.collectAsStateWithLifecycle()
     val volumeDaVoz by Ajustes.volumeDaVozAgora.collectAsStateWithLifecycle()
+    val tempos by Ajustes.tempos.collectAsStateWithLifecycle()
+    val sobreMim by Ajustes.sobreMim.collectAsStateWithLifecycle()
+    val memoriaDaIa by Ajustes.memoriaDaIa.collectAsStateWithLifecycle()
     lidoAoVoltar { Sons.reler() } // um som pode ter chegado pelo cabo
     val agora = agoraACada(15_000) // pros textos "rings in 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
@@ -141,6 +144,7 @@ private fun TelaPrincipal() {
                             CartaoAlarme(
                                 alarme = alarme,
                                 agora = agora,
+                                tempos = tempos,
                                 onLigar = { ligado -> salvarEAgendar(ctx, alarme.copy(ativo = ligado)) },
                                 onClick = { editando = alarme },
                             )
@@ -170,6 +174,7 @@ private fun TelaPrincipal() {
                         item {
                             SecaoTestes(
                                 iaPronta = iaPronta,
+                                frases = tempos.frases,
                                 onTestar = {
                                     Agendador.agendarTeste(ctx, 10)
                                     Toast.makeText(ctx, "Rings in 10 seconds. Lock the screen to see the full effect.", Toast.LENGTH_LONG).show()
@@ -190,7 +195,8 @@ private fun TelaPrincipal() {
                                 },
                             )
                         }
-                        item { SecaoAjustes(volumeDaVoz, Ajustes::escolherVolumeDaVoz) }
+                        item { SecaoAjustes(volumeDaVoz, Ajustes::escolherVolumeDaVoz, tempos, Ajustes::escolherTempos) }
+                        item { SecaoIa(sobreMim, Ajustes::escreverSobreMim, memoriaDaIa, onEsquecer = { Ajustes.guardarMemoriaDaIa("") }) }
                     }
                 }
             }

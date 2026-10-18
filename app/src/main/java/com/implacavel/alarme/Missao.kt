@@ -229,8 +229,8 @@ fun EtapaVerificacao(passo: Verificacao) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         val titulo = when {
             passo.frase.isNotEmpty() -> "Repeat after me"
-            passo.numero == 0 -> "Let's verify that you are awake"
-            else -> "Thank you! You reached the middle"
+            passo.numero < passo.total -> "Let's verify that you are awake"
+            else -> "Thank you! Now the camera gets stricter"
         }
         Text(titulo, color = VinhoAlarme, fontSize = 20.sp, textAlign = TextAlign.Center)
         if (passo.frase.isNotEmpty()) {
@@ -261,7 +261,7 @@ fun EtapaVerificacao(passo: Verificacao) {
                 minLines = 2,
                 maxLines = 2,
             )
-            Text("Phrase ${passo.numero} of $FRASES_POR_VERIFICACAO", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+            Text("Phrase ${passo.numero} of ${passo.total}", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
         }
         Spacer(Modifier.height(12.dp))
         Text(if (passo.suaVez) "🎤 Your turn" else "", color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -334,10 +334,11 @@ fun EtapaConversa(conversa: Conversa) {
         val vez = when {
             conversa.suaVez && conversa.perguntandoSeContinua -> "🎤 Your turn: yes or no?"
             conversa.suaVez -> "🎤 Your turn"
+            conversa.pensando && conversa.procurando.isNotEmpty() -> "🔎 Looking up: ${conversa.procurando}"
             conversa.pensando -> "Thinking…"
             else -> ""
         }
-        Text(vez, color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(vez, color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         // Calado na sua vez: quanto falta pro bipe (na pergunta, pra valer como não); bipando, o jeito de parar
         val faltam = ceil((SILENCIO_CONVERSA_MS - calado) / 1000.0).toInt().coerceAtLeast(0)
         val aviso = when {
@@ -363,7 +364,8 @@ fun EtapaFim() {
 
 /**
  * Etapa 2: câmera num círculo com um anel que enche enquanto a pessoa olha de olhos abertos, até
- * somar [metaMs]. [onOlhando] recebe o tempo já somado a cada [AVISO_OLHANDO_MS] enquanto ela olha
+ * somar [metaMs]; antes da verificação do meio (no serviço), para em [verificacaoMs]. [onOlhando] recebe o tempo já
+ * somado a cada [AVISO_OLHANDO_MS] enquanto ela olha
  * e no instante em que ela para (mantém a música calada; o serviço guarda o tempo, em
  * [AlarmeService.olhado]). Sem olhar, a tela mostra a contagem pra zerar, a partir do último sinal
  * recebido pelo serviço ([AlarmeService.ultimoOlhar]); bipes e zerar são da vigia de lá.
@@ -376,6 +378,7 @@ fun EtapaFim() {
 @Composable
 fun EtapaOlhar(
     metaMs: Long,
+    verificacaoMs: Long,
     onDefeito: () -> Unit,
     youtube: YoutubeDaMissao,
     pagina: @Composable (conteudo: @Composable () -> Unit) -> Unit,
@@ -402,6 +405,7 @@ fun EtapaOlhar(
     val concluir by rememberUpdatedState(onConcluiu)
     // A meta pode subir no meio: alarme de verdade disparando durante o teste (EmAndamento.juntar)
     val meta by rememberUpdatedState(metaMs)
+    val verificacao by rememberUpdatedState(verificacaoMs)
     // Continua do que o serviço guardou: voltou depois de sair da tela, ou a tela foi recriada no meio
     // (ex.: o tamanho da fonte do sistema mudou). Lá ele só zera nos 20 s sem olhar
     var olhadoMs by remember { mutableLongStateOf(AlarmeService.olhado.value) }
@@ -426,8 +430,8 @@ fun EtapaOlhar(
                 val olho = aberto?.let { ", olho ${porcento(it)}%" }.orEmpty()
                 Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}$olho, anel ${olhadoMs * 100 / meta}%")
             }
-            // Antes da verificação do meio (no serviço), o anel para na metade
-            val limite = if (AlarmeService.metadeVerificada.value) meta else meta / 2
+            // Antes da verificação do meio (no serviço), o anel para no fim do modo fácil
+            val limite = if (AlarmeService.metadeVerificada.value) meta else verificacao
             olhadoMs = minOf(avancarOlhar(olhadoMs, olhando, passoMs = agora - antes), maxOf(limite, olhadoMs))
             antes = agora
             // A cada segundo olhando, e no instante em que parou: a contagem pra zerar começa daí

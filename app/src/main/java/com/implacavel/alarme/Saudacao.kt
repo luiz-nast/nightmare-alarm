@@ -43,11 +43,25 @@ fun falaDosMinutos(minutos: Int) = "$minutos minutes passed."
 /** A conversa chegou na meta: em vez da IA, esta pergunta (a resposta passa por querContinuar). */
 const val FALA_CONTINUAR = "Good talk, sir. Want to keep talking a little more?"
 
-/** Fim da conversa (ou, sem a IA, logo depois do bom dia): a caminhada em seguida, chova ou faça sol. */
-const val FALA_SAIR = "Time to move, sir. Get dressed and go outside: you have four minutes to start walking."
+/**
+ * Fim da conversa (ou, sem a IA, logo depois do bom dia): a caminhada em seguida, chova ou faça sol, com o prazo pra
+ * sair dos ajustes ([prazoMs]; no teste, meio minuto; zero = já andando).
+ */
+fun falaDeSair(prazoMs: Long): String {
+    val prazo = when {
+        prazoMs <= 0L -> ""
+        prazoMs < 60_000L -> ": you have half a minute to start walking"
+        prazoMs < 120_000L -> ": you have one minute to start walking"
+        else -> ": you have ${prazoMs / 60_000} minutes to start walking"
+    }
+    return "Time to move, sir. Get dressed and go outside$prazo."
+}
 
 /** No lugar de uma fala da IA que manda descansar ou diz que o alarme acabou (respostaSegura). */
 const val FALA_NAO_NEGOCIA = "Not my call, sir. What is the first thing you will do today?"
+
+/** Enquanto a IA procura na internet o que a pessoa perguntou (a busca leva uns segundos): a voz avisa. */
+const val FALA_PROCURAR = "Good question, sir. Let me check that."
 
 /**
  * O sintetizador de voz do celular, em inglês, com uma voz instalada no celular ([vozSemInternet]): grava igual
