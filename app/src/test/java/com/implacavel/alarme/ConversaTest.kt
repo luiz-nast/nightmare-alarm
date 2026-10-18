@@ -185,32 +185,28 @@ class ConversaTest {
     }
 
     @Test
-    fun anotacoesAntigasQueOModeloEsqueceuVoltam() {
-        val antigas = "Wants to learn electronics, considering an Arduino kit (Oct 17)\nWorks with software (Oct 17)\nGoes to the gym after work (Oct 17)"
-        val novas = "- Bought an Arduino kit yesterday (Oct 18)\n- Works with software. (Oct 18)\n- Asked who invented the transistor (Oct 18)"
-        assertEquals(
-            "Bought an Arduino kit yesterday (Oct 18)\nWorks with software. (Oct 18)\nAsked who invented the transistor (Oct 18)\n" +
-                "Wants to learn electronics, considering an Arduino kit (Oct 17)\nGoes to the gym after work (Oct 17)",
-            juntarAnotacoes(antigas, novas),
-        )
-        // Sem novas (o modelo falhou), ficam as antigas; sem antigas, só as novas; nunca mais que o teto de linhas
-        assertEquals(limparAnotacoes(antigas), juntarAnotacoes(antigas, "  "))
-        assertEquals("Only new (Oct 18)", juntarAnotacoes("", "Only new (Oct 18)"))
-        assertEquals(MEMORIA_MAX_LINHAS, juntarAnotacoes((1..9).joinToString("\n") { "old fact $it" }, (1..9).joinToString("\n") { "new fact $it" }).lines().size)
+    fun anotacoesValemUmDiaSoDaUltimaConversa() {
+        val escrita = 1_790_000_000_000L
+        assertTrue(memoriaVale(escrita, escrita + 1_000))
+        assertTrue(memoriaVale(escrita, escrita + 26 * 3_600_000L)) // a manhã seguinte, mesmo mais tarde
+        assertTrue(memoriaVale(escrita, escrita + MEMORIA_VALIDA_MS))
+        assertFalse(memoriaVale(escrita, escrita + MEMORIA_VALIDA_MS + 1)) // dois dias depois, não
+        assertFalse(memoriaVale(escrita, escrita - 1)) // relógio que voltou
+        assertFalse(memoriaVale(0L, escrita)) // nunca escrita
     }
 
     @Test
-    fun pedidoDeAnotacoesLevaAsAntigasEAConversaDeHoje() {
+    fun pedidoDeAnotacoesLevaSoAConversaDeHoje() {
         val transcricao = listOf(Turno(daIa = true, texto = "Good morning, sir! How did the Arduino kit go?"), Turno(daIa = false, texto = "I bought it yesterday"))
-        val pedido = pedidoDeAnotacoes("Wants to learn electronics (Oct 17)", transcricao, LocalDate.of(2026, 10, 18))
+        val pedido = pedidoDeAnotacoes(transcricao, LocalDate.of(2026, 10, 18))
         assertTrue(pedido.contains("Today is Sunday, October 18, 2026."))
-        assertTrue(pedido.contains("Old notes:\nWants to learn electronics (Oct 17)"))
         assertTrue(pedido.contains("You: Good morning, sir! How did the Arduino kit go?\nHe: I bought it yesterday"))
         assertTrue(pedido.contains("like (Oct 18)"))
-        assertTrue(pedidoDeAnotacoes("", transcricao, LocalDate.of(2026, 10, 18)).contains("Old notes:\n(none)"))
+        assertTrue(pedido.contains("nothing about the alarm or about wanting to sleep"))
+        assertFalse(pedido.contains("Old notes")) // nada de antes: cada conversa escreve as suas do zero
         // Conversa longa: ficam as últimas falas, até o limite
         val longa = (1..100).map { Turno(daIa = it % 2 == 0, texto = "fala $it " + "palavra ".repeat(20)) }
-        val cortado = pedidoDeAnotacoes("", longa, LocalDate.of(2026, 10, 18))
+        val cortado = pedidoDeAnotacoes(longa, LocalDate.of(2026, 10, 18))
         assertFalse(cortado.contains("fala 1 "))
         assertTrue(cortado.contains("fala 100 "))
         assertTrue(cortado.length < TRANSCRICAO_MAX_LETRAS + 1_000)
@@ -330,17 +326,18 @@ class ConversaTest {
         assertTrue(instrucao.contains("Stay on the subject while it is alive"))
         assertTrue(instrucao.contains("Change the subject only when it has died"))
         // Conta coisas antes de perguntar, responde o que ele pergunta e pode pedir busca
-        assertTrue(instrucao.contains("Two to four short sentences, 40 words at most"))
+        assertTrue(instrucao.contains("two short sentences, three at most, 30 words at most"))
         assertTrue(instrucao.contains("Never reply with only a question"))
         assertTrue(instrucao.contains("never by judging what he said"))
+        assertTrue(instrucao.contains("mention them lightly, never insist"))
         assertTrue(instrucao.contains("SEARCH: <his question in 3 to 8 plain words>"))
         assertTrue(instrucao.contains("never your own guess of the answer"))
         assertFalse(instrucao.contains("About him"))
-        assertFalse(instrucao.contains("Your notes from earlier mornings"))
-        // O que ele contou de si e as anotações das manhãs de antes
+        assertFalse(instrucao.contains("Your notes from your last talk"))
+        // O que ele contou de si e as anotações da última conversa
         val comEle = instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), sobreEle = "I'm Luiz, I work with software.", memoria = "Wants to learn electronics (Oct 17)")
         assertTrue(comEle.contains("About him, in his own words:\nI'm Luiz, I work with software."))
-        assertTrue(comEle.contains("Your notes from earlier mornings (the date is when you learned it):\nWants to learn electronics (Oct 17)"))
+        assertTrue(comEle.contains("Your notes from your last talk with him (the date is when it happened):\nWants to learn electronics (Oct 17)"))
         assertEquals(SOBRE_MIM_MAX_LETRAS, instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), sobreEle = "§".repeat(5_000)).count { it == '§' })
         assertEquals(MEMORIA_MAX_LETRAS, instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), memoria = "§".repeat(5_000)).count { it == '§' })
         // Sem notícias nem metas

@@ -22,7 +22,7 @@ data class Turno(val daIa: Boolean, val texto: String)
  *
  * No meio de um pedido a IA pode pedir uma busca na internet ([consultaDaBusca]): o motor busca ([Pesquisa]), avisa
  * [aoProcurar] (a tela mostra "Looking up…") e só então devolve a fala. No fim da conversa, [anotar] pede a ela as
- * anotações sobre a pessoa pra manhã seguinte ([pedidoDeAnotacoes]).
+ * anotações sobre a pessoa pra manhã seguinte ([pedidoDeAnotacoes]; valem um dia, [MEMORIA_VALIDA_MS]).
  */
 interface MotorDaConversa {
     /** Começa a ler a instrução já, em segundo plano (a leitura leva segundos): a abertura sai mais rápido. */
@@ -38,11 +38,11 @@ interface MotorDaConversa {
     var aoProcurar: ((consulta: String) -> Unit)?
 
     /**
-     * Fim da conversa: a IA reescreve as anotações sobre a pessoa a partir das [antigas] e da [transcricao] de hoje;
-     * [aoTerminar] recebe as novas, limpas ([limparAnotacoes]), ou null se não deu, na thread principal. Depois disto
-     * a conversa não responde mais (vale como [desligar]).
+     * Fim da conversa: a IA escreve as anotações sobre a pessoa a partir da [transcricao] de hoje (só de hoje: nada se
+     * acumula); [aoTerminar] recebe as notas, limpas ([limparAnotacoes]), ou null se não deu, na thread principal.
+     * Depois disto a conversa não responde mais (vale como [desligar]).
      */
-    fun anotar(antigas: String, transcricao: List<Turno>, aoTerminar: (String?) -> Unit)
+    fun anotar(transcricao: List<Turno>, aoTerminar: (String?) -> Unit)
 
     companion object {
         /** Dá pra conversar nesta manhã: o modelo está no celular e cabe na memória ([ModeloLocal.disponivel]). */

@@ -977,11 +977,11 @@ class AlarmeService : Service() {
 
     /**
      * O motor da IA desta manhã, com a instrução feita das [manchetes], das [metas], do que o dono contou de si e das
-     * anotações das manhãs de antes ([Ajustes.memoriaDaIa]); null sem o modelo. Quando ela pede uma busca, a tela
+     * anotações da última conversa, se ainda valem ([Ajustes.memoriaDaIaValida]); null sem o modelo. Quando ela pede uma busca, a tela
      * mostra o que ela procura e a voz avisa ([FALA_PROCURAR]), pra espera não parecer travada.
      */
     private fun criarMotor(manchetes: List<String>, metas: String): MotorDaConversa? {
-        val memoria = Ajustes.memoriaDaIa.value
+        val memoria = Ajustes.memoriaDaIaValida() // só a última conversa, e só por um dia
         val instrucao = instrucaoDoTreinador(manchetes, metas, LocalTime.now(), Ajustes.sobreMim.value, memoria)
         val ia = MotorDaConversa.criar(this, instrucao, pedidoDeAbertura(manchetes, memoria), FALA_NAO_NEGOCIA) ?: return null
         // O mesmo motor segue depois de a música voltar (a rodada muda): basta a conversa estar esperando a IA
@@ -1392,7 +1392,7 @@ class AlarmeService : Service() {
         pararEscuta()
         val ia = motor
         if (ia != null && transcricao.any { !it.daIa }) {
-            ia.anotar(Ajustes.memoriaDaIa.value, transcricao.toList()) { novas ->
+            ia.anotar(transcricao.toList()) { novas ->
                 if (novas.isNullOrBlank()) Log.w(TAG, "Conversa: a IA não deixou anotações") else Ajustes.guardarMemoriaDaIa(novas)
             }
         }

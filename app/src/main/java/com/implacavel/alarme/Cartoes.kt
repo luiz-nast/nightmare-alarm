@@ -251,11 +251,12 @@ private fun AjusteDeInteiro(titulo: String, valor: Int, faixa: IntRange, unidade
 
 /**
  * A IA da manhã, recolhida: o que o dono conta de si ([sobreMim], gravado enquanto digita, até
- * [SOBRE_MIM_MAX_LETRAS]) e o que a IA anotou dele nas conversas ([memoria], com o botão de esquecer). Os dois vão
- * na instrução da IA toda manhã: é o que faz a conversa continuar de onde parou, em vez de recomeçar do zero.
+ * [SOBRE_MIM_MAX_LETRAS]) e o que a IA anotou dele na última conversa ([memoria], escrita em [memoriaEm]; com o
+ * botão de esquecer). Os dois vão na instrução da IA de manhã (as notas, só enquanto valem: [memoriaVale]): é o que
+ * faz a conversa continuar de onde parou, em vez de recomeçar do zero, sem virar uma pilha de dias.
  */
 @Composable
-fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, onEsquecer: () -> Unit) {
+fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, memoriaEm: Long, onEsquecer: () -> Unit) {
     var texto by remember(sobreMim) { mutableStateOf(sobreMim) }
     // Grava um instante depois da última letra, não a cada tecla
     LaunchedEffect(texto) {
@@ -265,10 +266,12 @@ fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, onE
         }
     }
     val linhas = memoria.lines().count { it.isNotBlank() }
+    val valem = memoriaVale(memoriaEm, System.currentTimeMillis())
     val resumo = when {
-        sobreMim.isBlank() && linhas == 0 -> "Tell it about you · no notes yet"
-        linhas == 0 -> "Knows what you wrote · no notes yet"
-        else -> "Remembers $linhas ${if (linhas == 1) "thing" else "things"} from your talks"
+        sobreMim.isBlank() && linhas == 0 -> "Tell it about you · no notes from a last talk"
+        linhas == 0 -> "Knows what you wrote · no notes from a last talk"
+        valem -> "Remembers $linhas ${if (linhas == 1) "thing" else "things"} from your last talk"
+        else -> "Notes from the last talk expired"
     }
     SecaoRecolhivel("AI companion", resumo, alerta = false) {
         TituloDoAjuste("About you")
@@ -286,18 +289,24 @@ fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, onE
         )
         Text("${texto.length}/$SOBRE_MIM_MAX_LETRAS", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp))
 
-        TituloDoAjuste("What the AI remembers")
+        TituloDoAjuste("What the AI remembers from the last talk")
         Text(
-            if (memoria.isBlank()) {
-                "Nothing yet. After each talk the AI writes a few lines about what you said, and reads them the next morning."
-            } else {
-                memoria
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = 4.dp),
+            "Only the last talk counts: at the end of each conversation the AI writes these lines again from scratch, and they expire after a day and a half. Nothing piles up.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 6.dp),
         )
-        if (memoria.isNotBlank()) {
-            TextButton(onClick = onEsquecer, modifier = Modifier.padding(top = 4.dp)) { Text("Forget everything") }
+        if (memoria.isBlank()) {
+            Text("Nothing yet.", style = MaterialTheme.typography.bodyMedium)
+        } else {
+            val quando = java.time.Instant.ofEpochMilli(memoriaEm).atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, HH:mm", java.util.Locale.US))
+            Text(
+                if (valem) "Written $quando · used in the next morning talk" else "Written $quando · too old, not used anymore",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (valem) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(memoria, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+            TextButton(onClick = onEsquecer, modifier = Modifier.padding(top = 4.dp)) { Text("Forget it") }
         }
         Text(
             "Looking things up: when you ask about a fact, the AI may search Wikipedia and the news for a few seconds. The model itself stays on the phone.",

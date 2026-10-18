@@ -46,7 +46,7 @@ private val MANCHETES_DE_TESTE = listOf(
     "Nova linha de metrô em São Paulo começa a operar em fase de testes - Estadão",
 )
 
-/** Anotações de uma manhã de antes, como as que a IA guarda ([Ajustes.memoriaDaIa]): a abertura deve retomar isto. */
+/** Anotações da conversa de ontem, como as que a IA guarda ([Ajustes.memoriaDaIa]): a abertura deve retomar isto. */
 private const val MEMORIA_DE_TESTE = "Wants to learn electronics, thinking about buying an Arduino kit (Oct 17)\nWorks with software, goes to the gym after work (Oct 17)"
 
 // Respostas de quem acabou de acordar: a retomada do assunto das anotações, uma pergunta de fato (ela deve pedir a
@@ -142,7 +142,7 @@ class TesteDaIa : BroadcastReceiver() {
             // As anotações do fim da conversa, como o alarme faz ([MotorDaConversa.anotar])
             if (SystemClock.elapsedRealtime() - inicio < ANOTAR_ATE_MS) {
                 val antes = SystemClock.elapsedRealtime()
-                val notas = ModeloLocal.anotarCom(engine, MEMORIA_DE_TESTE, transcricao, LocalDate.now())
+                val notas = ModeloLocal.anotarCom(engine, transcricao, LocalDate.now())
                 Log.i(TAG, "IA teste: anotações em ${SystemClock.elapsedRealtime() - antes} ms (${notas.lines().size} linhas):")
                 notas.lines().forEach { Log.i(TAG, "IA teste:   $it") }
             } else {

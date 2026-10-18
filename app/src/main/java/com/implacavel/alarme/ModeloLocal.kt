@@ -44,11 +44,11 @@ private const val MEMORIA_MINIMA = 1_500L * 1024 * 1024
 const val CONTEXTO_TOKENS = 4096
 
 /**
- * Tamanho máximo de uma resposta, em tokens: duas a quatro frases curtas, 40 palavras (uns 60 tokens), com folga; passou,
+ * Tamanho máximo de uma resposta, em tokens: duas ou três frases curtas, 30 palavras (uns 45 tokens), com folga; passou,
  * [ateAUltimaFrase] tira a frase pela metade. No S24 FE o modelo escreve uns 17 a 19 tokens por segundo: uma fala cheia
- * leva uns 4 s pra nascer (e uns 15 s pra voz dizer). O dono prefere isso a perguntas curtas de script.
+ * leva uns 3 s pra nascer (e uns 11 s pra voz dizer). Era 84 (40 palavras): o dono achou que falava demais.
  */
-const val RESPOSTA_MAX_TOKENS = 84
+const val RESPOSTA_MAX_TOKENS = 64
 
 /** A amostragem do Gemma 4 (a recomendada pelo Google, com a temperatura um pouco abaixo de 1: varia as falas sem perder o fio). */
 private val AMOSTRAGEM = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.9)
@@ -185,10 +185,10 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
 
         /**
          * As anotações sobre a pessoa, numa conversa à parte com o modelo [engine] (só na thread do modelo), com um teto
-         * de tokens maior que o das falas ([ANOTACOES_MAX_TOKENS]): as [antigas], a [transcricao] de hoje e a data de
-         * [hoje] vão em [pedidoDeAnotacoes]; volta limpo e com as antigas que o modelo deixou cair ([juntarAnotacoes]).
+         * de tokens maior que o das falas ([ANOTACOES_MAX_TOKENS]): a [transcricao] de hoje e a data de [hoje] vão em
+         * [pedidoDeAnotacoes]; volta limpo ([limparAnotacoes]). Só a conversa de hoje: nada se acumula de um dia pro outro.
          */
-        internal fun anotarCom(engine: Engine, antigas: String, transcricao: List<Turno>, hoje: LocalDate): String =
+        internal fun anotarCom(engine: Engine, transcricao: List<Turno>, hoje: LocalDate): String =
             engine.createConversation(
                 ConversationConfig(
                     systemInstruction = Contents.of(INSTRUCAO_DAS_ANOTACOES),
@@ -197,7 +197,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
                     maxOutputToken = ANOTACOES_MAX_TOKENS,
                     thinkingConfig = ThinkingConfig(enableThinking = false),
                 ),
-            ).use { c -> juntarAnotacoes(antigas, textoDe(c.sendMessage(pedidoDeAnotacoes(antigas, transcricao, hoje)))) }
+            ).use { c -> limparAnotacoes(textoDe(c.sendMessage(pedidoDeAnotacoes(transcricao, hoje)))) }
     }
 
     private val app = ctx.applicationContext
@@ -254,7 +254,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
      * As anotações pra manhã seguinte, depois do que estiver em curso na thread do modelo (uma resposta jogada fora
      * termina de escrever antes). A conversa da manhã fecha antes de anotar: as duas não ficam na memória juntas.
      */
-    override fun anotar(antigas: String, transcricao: List<Turno>, aoTerminar: (String?) -> Unit) {
+    override fun anotar(transcricao: List<Turno>, aoTerminar: (String?) -> Unit) {
         if (desligado) return aoTerminar(null)
         desligado = true
         cancelar()
@@ -262,7 +262,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
             val inicio = SystemClock.elapsedRealtime()
             conversa?.let { runCatching { it.close() } }
             conversa = null
-            val novas = runCatching { anotarCom(carregado(app), antigas, transcricao, LocalDate.now()) }
+            val novas = runCatching { anotarCom(carregado(app), transcricao, LocalDate.now()) }
                 .onFailure { Log.w(TAG, "IA do celular: não anotou (${it.javaClass.simpleName}: ${it.message?.take(120)})") }
                 .getOrNull()
             if (novas != null) Log.i(TAG, "IA do celular: anotações da conversa (${novas.lines().size} linhas) em ${SystemClock.elapsedRealtime() - inicio} ms")

@@ -75,6 +75,7 @@ private fun TelaPrincipal() {
     val tempos by Ajustes.tempos.collectAsStateWithLifecycle()
     val sobreMim by Ajustes.sobreMim.collectAsStateWithLifecycle()
     val memoriaDaIa by Ajustes.memoriaDaIa.collectAsStateWithLifecycle()
+    val memoriaEm by Ajustes.memoriaEm.collectAsStateWithLifecycle()
     lidoAoVoltar { Sons.reler() } // um som pode ter chegado pelo cabo
     val agora = agoraACada(15_000) // pros textos "rings in 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
@@ -196,7 +197,7 @@ private fun TelaPrincipal() {
                             )
                         }
                         item { SecaoAjustes(volumeDaVoz, Ajustes::escolherVolumeDaVoz, tempos, Ajustes::escolherTempos) }
-                        item { SecaoIa(sobreMim, Ajustes::escreverSobreMim, memoriaDaIa, onEsquecer = { Ajustes.guardarMemoriaDaIa("") }) }
+                        item { SecaoIa(sobreMim, Ajustes::escreverSobreMim, memoriaDaIa, memoriaEm, onEsquecer = { Ajustes.guardarMemoriaDaIa("") }) }
                     }
                 }
             }

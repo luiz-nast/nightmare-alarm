@@ -16,7 +16,7 @@ const val SOBRE_MIM_MAX_LETRAS = 600
 
 /**
  * Ajustes e estado que precisam sobreviver ao processo: o volume da voz, os tempos dos despertadores ([Tempos]), as
- * ondas mudas, o que o dono contou de si e o que a IA anotou dele ([memoriaDaIa]), e o alarme em andamento (e onde a
+ * ondas mudas, o que o dono contou de si e o que a IA anotou dele na última conversa ([memoriaDaIa]), e o alarme em andamento (e onde a
  * missão dele está). Gravado em [prefsProtegidas], como os alarmes. Os sons ficam em [Sons] (a música única de antes,
  * "musicaUri", é migrada pra lá).
  */
@@ -116,17 +116,31 @@ object Ajustes {
     }
 
     private val _memoriaDaIa = MutableStateFlow("")
+    private val _memoriaEm = MutableStateFlow(0L)
 
     /**
-     * O que a IA anotou do dono nas conversas de antes ([limparAnotacoes]): no fim de cada conversa ela reescreve as
-     * notas, e na manhã seguinte lê. O dono vê e apaga nos ajustes ("What the AI remembers").
+     * O que a IA anotou do dono na última conversa ([limparAnotacoes]): no fim de cada conversa ela escreve as notas
+     * do zero (nada se acumula), e na manhã seguinte lê, se ainda valem ([memoriaVale], 36 h: a janela de um dia que
+     * o dono pediu). O dono vê e apaga nos ajustes ("What the AI remembers").
      */
     val memoriaDaIa: StateFlow<String> = _memoriaDaIa.asStateFlow()
 
-    fun guardarMemoriaDaIa(texto: String) {
+    /** Quando (epoch, ms) a IA escreveu [memoriaDaIa]; 0 = nunca. */
+    val memoriaEm: StateFlow<Long> = _memoriaEm.asStateFlow()
+
+    /** As anotações pra instrução desta manhã: as da última conversa, se foram escritas há menos de um dia e meio; senão, nada. */
+    fun memoriaDaIaValida(agora: Long = System.currentTimeMillis()): String =
+        if (memoriaVale(_memoriaEm.value, agora)) _memoriaDaIa.value else ""
+
+    fun guardarMemoriaDaIa(texto: String, agora: Long = System.currentTimeMillis()) {
         val valor = limparAnotacoes(texto)
-        prefs.edit { putString("memoriaDaIa", valor) }
+        val quando = if (valor.isEmpty()) 0L else agora
+        prefs.edit {
+            putString("memoriaDaIa", valor)
+            putLong("memoriaEm", quando)
+        }
         _memoriaDaIa.value = valor
+        _memoriaEm.value = quando
     }
 
     /** Chamado uma vez em [App.onCreate]. */
@@ -147,5 +161,6 @@ object Ajustes {
         _ondasMudas.value = prefs.getBoolean("ondasMudas", false)
         _sobreMim.value = prefs.getString("sobreMim", "").orEmpty().take(SOBRE_MIM_MAX_LETRAS)
         _memoriaDaIa.value = limparAnotacoes(prefs.getString("memoriaDaIa", "").orEmpty())
+        _memoriaEm.value = prefs.getLong("memoriaEm", 0L)
     }
 }
