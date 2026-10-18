@@ -2,6 +2,7 @@
 package com.implacavel.alarme
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,12 +48,50 @@ private val Claro = lightColorScheme(
 )
 
 /**
- * Tema do app: tons de vermelho de alarme, sempre claro, mesmo com o sistema no modo escuro (o dono
- * pediu; assim o YouTube da etapa da câmera também fica claro).
+ * A noite do Nightmare Alarm (a tela principal e o editor, 10-17, o dono pediu componentes escuros): tinta roxa quase
+ * preta de fundo, brasa (laranja-vermelho) no que acende e chama (botões, interruptor ligado, o tipo do alarme), lilás
+ * nos destaques secundários e menta no que está certo. Nunca segue o sistema: é sempre esta.
+ */
+private val Noite = darkColorScheme(
+    primary = Color(0xFFFF6A4D),
+    onPrimary = Color(0xFF2A0600),
+    primaryContainer = Color(0xFF5C1A0B),
+    onPrimaryContainer = Color(0xFFFFD9D0),
+    secondary = Color(0xFFC8B6FF),
+    onSecondary = Color(0xFF241347),
+    secondaryContainer = Color(0xFF3B2A66),
+    onSecondaryContainer = Color(0xFFE6DDFF),
+    tertiary = Color(0xFF6EE7D2),
+    onTertiary = Color(0xFF00382F),
+    tertiaryContainer = Color(0xFF0F4F45),
+    onTertiaryContainer = Color(0xFFBFF5EA),
+    error = Color(0xFFFF8A80),
+    onError = Color(0xFF3A0000),
+    errorContainer = Color(0xFF5C1212),
+    onErrorContainer = Color(0xFFFFDAD6),
+    background = Color(0xFF0D0A14),
+    onBackground = Color(0xFFECE6F5),
+    surface = Color(0xFF0D0A14),
+    onSurface = Color(0xFFECE6F5),
+    surfaceVariant = Color(0xFF2B2140),
+    onSurfaceVariant = Color(0xFFB7ACC9),
+    outline = Color(0xFF7E7392),
+    outlineVariant = Color(0xFF3A2F4D),
+    surfaceContainerLowest = Color(0xFF080610),
+    surfaceContainerLow = Color(0xFF150F1F),
+    surfaceContainer = Color(0xFF1B1428),
+    surfaceContainerHigh = Color(0xFF231A33),
+    surfaceContainerHighest = Color(0xFF2B2140),
+)
+
+/**
+ * Tema do app, que nunca segue o modo claro/escuro do sistema (o dono pediu). A tela do alarme fica com o [Claro]
+ * (tons de vermelho; o YouTube da etapa da câmera, um WebView, segue o tema claro da tela e fica claro, pra iluminar o
+ * rosto); a tela principal e o editor, com [escuro], ficam na [Noite].
  */
 @Composable
-fun TemaImplacavel(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Claro, content = content)
+fun TemaImplacavel(escuro: Boolean = false, content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = if (escuro) Noite else Claro, content = content)
 }
 
 /** Hora atual, que se atualiza sozinha a cada [intervaloMs] (relógio da tela do alarme, textos "toca em 9 h"). */

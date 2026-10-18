@@ -1,6 +1,7 @@
 <resources>
+    <!-- A tela principal é escura (a "Noite" de Tema.kt); o pai claro não importa aqui: não há WebView -->
     <style name="Tema" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/fundo_claro</item>
+        <item name="android:windowBackground">@color/fundo_noite</item>
     </style>
 
     <!-- Claro: o YouTube da etapa da câmera (WebView) segue o tema da tela e também fica claro -->

@@ -43,7 +43,7 @@ import kotlin.math.roundToInt
 fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
     val proximo = alarmes.filter { it.ativo }.map { it.proximoDisparo(agora) }.minByOrNull { it.toEpochSecond() }
     Column(Modifier.padding(top = 16.dp, bottom = 4.dp)) {
-        Text("Nightmare Alarm", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Nightmare Alarm", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
         Text(
             if (proximo == null) {
                 "No alarm on"
@@ -111,7 +111,11 @@ fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
                     Text(poder.explicacao, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.width(8.dp))
-                if (liberado) Text("✓", fontSize = 20.sp, fontWeight = FontWeight.Bold) else Button(onClick = { onLiberar(poder) }) { Text("Allow") }
+                if (liberado) {
+                    Text("✓", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
+                } else {
+                    Button(onClick = { onLiberar(poder) }) { Text("Allow") }
+                }
             }
         }
         if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
@@ -177,25 +181,26 @@ fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit) {
 }
 
 /**
- * A biblioteca de sons ([Sons]): cada som com a bolinha do padrão (o que toca nos alarmes sem som próprio) e "Remove";
- * "Phone alarm ringtone" é o padrão sem som nenhum. "Add sound" copia um arquivo do celular pra dentro do app.
+ * A biblioteca de sons ([Sons]), recolhida: fechada, o padrão e quantos sons há; aberta, cada som com a bolinha do
+ * padrão (o que toca nos alarmes sem som próprio) e "Remove"; "Phone alarm ringtone" é o padrão sem som nenhum. "Add
+ * sound" copia um arquivo do celular pra dentro do app.
  */
 @Composable
-fun CartaoSons(sons: List<Sons.Som>, padrao: String?, onAdicionar: () -> Unit, onPadrao: (String?) -> Unit, onRemover: (String) -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Sounds", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Button(onClick = onAdicionar) { Text("Add sound") }
-            }
-            Text(
-                "Each alarm picks its sound in the editor; the marked one plays when an alarm has none. Sounds are copied into the app: they keep playing even if the original file is gone.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
-            )
-            LinhaDoSom("Phone alarm ringtone", padrao == null, { onPadrao(null) }, onRemover = null)
-            sons.forEach { som -> LinhaDoSom(som.nome, padrao == som.nome, { onPadrao(som.nome) }) { onRemover(som.nome) } }
-        }
+fun SecaoSons(sons: List<Sons.Som>, padrao: String?, onAdicionar: () -> Unit, onPadrao: (String?) -> Unit, onRemover: (String) -> Unit) {
+    val quantos = when (sons.size) {
+        0 -> "no sounds in the app yet"
+        1 -> "1 sound in the app"
+        else -> "${sons.size} sounds in the app"
+    }
+    SecaoRecolhivel("Sounds", "Default: ${padrao ?: "phone alarm ringtone"} · $quantos", alerta = false) {
+        Text(
+            "Each alarm picks its sound in the editor; the marked one plays when an alarm has none. Sounds are copied into the app: they keep playing even if the original file is gone.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+        )
+        LinhaDoSom("Phone alarm ringtone", padrao == null, { onPadrao(null) }, onRemover = null)
+        sons.forEach { som -> LinhaDoSom(som.nome, padrao == som.nome, { onPadrao(som.nome) }) { onRemover(som.nome) } }
+        OutlinedButton(onClick = onAdicionar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Add sound") }
     }
 }
 
@@ -218,6 +223,7 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                 Text(
                     listOfNotNull(alarme.rotulo.ifBlank { null }, resumoDias(alarme.dias), alarme.som?.let { "♪ $it" }).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.secondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
