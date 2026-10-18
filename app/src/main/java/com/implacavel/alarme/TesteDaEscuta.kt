@@ -265,9 +265,17 @@ class TesteDaEscuta : Activity() {
         return Resultado(hipoteses.toList(), chegou?.let { it - fimDaFala })
     }
 
+    private var anterior = 0f
+    private var filtrado = 0f
+
+    /** O volume do pedaço como a [Escuta] mede: sem o grave abaixo de ~80 Hz (zumbido, batida na mesa). */
     private fun volumeDb(pedaco: ShortArray): Float {
         var soma = 0.0
-        for (x in pedaco) soma += x.toDouble() * x
+        for (x in pedaco) {
+            filtrado = 0.97f * (filtrado + x - anterior)
+            anterior = x.toFloat()
+            soma += filtrado.toDouble() * filtrado
+        }
         return (20 * log10((sqrt(soma / pedaco.size) / 32768).coerceAtLeast(1e-6))).toFloat()
     }
 
