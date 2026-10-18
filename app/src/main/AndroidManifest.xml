@@ -113,6 +113,14 @@
             android:permission="android.permission.DUMP"
             android:taskAffinity="" />
 
+        <!-- Teste do reconhecimento de voz com a voz da pessoa, sem som, só pelo cabo. Veja TesteDaEscuta.kt -->
+        <activity
+            android:name=".TesteDaEscuta"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:taskAffinity="" />
+
         <!-- Teste do GPS da caminhada, sem alarme e sem som, só pelo cabo, como o TesteDoSom. Veja TesteDoGps.kt -->
         <activity
             android:name=".TesteDoGps"

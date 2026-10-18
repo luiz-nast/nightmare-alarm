@@ -63,6 +63,7 @@ class TesteDoSom : Activity() {
         }
         emTeste = true
         if (intent.getBooleanExtra("escuta", false) && Build.VERSION.SDK_INT >= 33) return escutar()
+        if (intent.getBooleanExtra("suporte", false) && Build.VERSION.SDK_INT >= 33) return suporte()
         val pelocano = intent.getBooleanExtra("cano", false)
         val voz = if (pelocano) Voz(applicationContext, emptyMap()) else null
         val minutos = intent.getIntExtra("minutos", 0)
@@ -77,6 +78,45 @@ class TesteDoSom : Activity() {
                     emTeste = false
                     finish()
                 }
+            }
+        }
+    }
+
+    /**
+     * Que idiomas cada reconhecedor do celular tem no aparelho (instalados, baixando, baixáveis) e online: só pergunta,
+     * não baixa nada. --ez suporte true.
+     */
+    @androidx.annotation.RequiresApi(33)
+    private fun suporte() {
+        val pedido = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+        val servicos = listOf("tts", "as").mapNotNull { servicoDeReconhecimento(it) }
+        val faltam = CountDownLatch(servicos.size)
+        val reconhecedores = servicos.map { servico ->
+            SpeechRecognizer.createSpeechRecognizer(this, servico).also { r ->
+                r.checkRecognitionSupport(pedido, mainExecutor, object : android.speech.RecognitionSupportCallback {
+                    override fun onSupportResult(s: android.speech.RecognitionSupport) {
+                        Log.i(
+                            TAG,
+                            "Som teste: suporte de ${servico.packageName}: no aparelho ${s.installedOnDeviceLanguages}, baixando ${s.pendingOnDeviceLanguages}, " +
+                                "baixáveis ${s.supportedOnDeviceLanguages.size} (en-US? ${"en-US" in s.supportedOnDeviceLanguages}), online ${s.onlineLanguages.size}",
+                        )
+                        faltam.countDown()
+                    }
+                    override fun onError(error: Int) {
+                        Log.i(TAG, "Som teste: suporte de ${servico.packageName}: erro $error")
+                        faltam.countDown()
+                    }
+                })
+            }
+        }
+        thread(name = "teste-suporte") {
+            faltam.await(15, TimeUnit.SECONDS)
+            principal.post {
+                reconhecedores.forEach { it.destroy() }
+                emTeste = false
+                finish()
             }
         }
     }
@@ -185,11 +225,19 @@ class TesteDoSom : Activity() {
         val (leitura, escrita) = ParcelFileDescriptor.createPipe()
         val fim = CountDownLatch(1)
         var reconhecedor: SpeechRecognizer? = null
+        // --es servico as|tts|pacote/classe: qual reconhecedor do celular (o padrão do sistema sem nada)
+        val servico = servicoDeReconhecimento(intent.getStringExtra("servico"))
+        Log.i(TAG, "Som teste: cano, reconhecedor ${servico?.flattenToShortString() ?: "padrão do sistema"}")
+        fun hipoteses(b: Bundle?): String {
+            val textos = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+            val notas = b?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+            return textos.mapIndexed { i, t -> "\"$t\"" + (notas?.getOrNull(i)?.let { " (%.2f)".format(it) } ?: "") }.joinToString(" | ")
+        }
         runOnUiThread {
-            reconhecedor = SpeechRecognizer.createSpeechRecognizer(this).apply {
+            reconhecedor = (if (servico != null) SpeechRecognizer.createSpeechRecognizer(this, servico) else SpeechRecognizer.createSpeechRecognizer(this)).apply {
                 setRecognitionListener(object : RecognitionListener {
                     override fun onSegmentResults(segmentResults: Bundle) {
-                        Log.i(TAG, "Som teste: cano, frase: ${segmentResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()}")
+                        Log.i(TAG, "Som teste: cano, frase: ${hipoteses(segmentResults)}")
                     }
                     override fun onEndOfSegmentedSession() {
                         Log.i(TAG, "Som teste: cano, fim da sessão")
@@ -200,7 +248,7 @@ class TesteDoSom : Activity() {
                         fim.countDown()
                     }
                     override fun onResults(results: Bundle?) {
-                        Log.i(TAG, "Som teste: cano, final: ${results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)}")
+                        Log.i(TAG, "Som teste: cano, final: ${hipoteses(results)}")
                         fim.countDown()
                     }
                     override fun onPartialResults(partialResults: Bundle?) {}
@@ -214,8 +262,9 @@ class TesteDoSom : Activity() {
                 startListening(
                     Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                         .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, intent.getStringExtra("idioma") ?: "en-US") // --es idioma en-GB
                         .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                        .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                         .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, leitura)
                         .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
                         .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
@@ -254,6 +303,17 @@ class TesteDoSom : Activity() {
         @Volatile var emTeste = false
 
         const val FRASE_DE_TESTE = "Nice. What are you going to eat for breakfast today?"
+
+        /**
+         * O reconhecedor pedido no teste: "as" é o da Inteligência do Sistema Android (o das legendas ao vivo, o modelo
+         * grande que o Pixel usa), "tts" o dos Serviços de Fala do Google (o padrão do S24 FE), ou "pacote/classe".
+         */
+        fun servicoDeReconhecimento(nome: String?): android.content.ComponentName? = when (nome) {
+            null, "", "padrao" -> null
+            "as" -> android.content.ComponentName("com.google.android.as", "com.google.android.apps.miphone.aiai.app.AiAiSpeechRecognitionService")
+            "tts" -> android.content.ComponentName("com.google.android.tts", "com.google.android.apps.speech.tts.googletts.service.GoogleTTSRecognitionService")
+            else -> android.content.ComponentName.unflattenFromString(nome)
+        }
         const val TAXA_TOM = 24_000
 
         /** Por cima do volume de alarme mínimo: bem baixinho. */

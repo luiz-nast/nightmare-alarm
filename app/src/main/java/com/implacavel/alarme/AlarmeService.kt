@@ -1248,7 +1248,7 @@ class AlarmeService : Service() {
             c.perguntandoSeContinua -> respondeuSeContinua(texto)
             conversadoMs < c.metaMs -> {
                 provisoria = Provisoria(texto)
-                responderNaIa(texto)
+                responderNaIa(falaComAlternativas(texto, escuta?.alternativas().orEmpty()))
             }
             extras == 0 -> perguntarSeContinua(texto)
             else -> terminarConversa("tempo de conversa completo, com o extra")

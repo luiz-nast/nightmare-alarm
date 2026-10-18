@@ -7,6 +7,7 @@
 package com.implacavel.alarme
 
 import android.annotation.SuppressLint
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioFormat
@@ -46,7 +47,11 @@ class Escuta(
     private val onSom: (comecou: Boolean, db: Float) -> Unit,
     private val onTexto: (String) -> Unit,
     private val onIndisponivel: () -> Unit,
+    private val servico: ComponentName? = null, // qual reconhecedor do celular; null = o padrão do sistema
+    private val idioma: String = "en-US",
 ) {
+    private var hipotesesDaFrase: List<String> = emptyList() // as outras hipóteses da última frase terminada
+    private var frasesDaVez = 0 // frases terminadas desde a [novaVez]
     private val handler = Handler(Looper.getMainLooper())
     private val detector = DetectorDeSom()
     private val fila = ArrayBlockingQueue<ShortArray>(FILA_QUADROS)
@@ -112,7 +117,15 @@ class Escuta(
     /** A vez nova da pessoa: o que ela disse antes não conta mais. */
     fun novaVez() {
         frases = ""
+        frasesDaVez = 0
+        hipotesesDaFrase = emptyList()
     }
+
+    /**
+     * O que o reconhecedor também achou que ouviu na vez de agora (as outras hipóteses, da mais provável pra menos),
+     * pra IA escolher a que faz sentido. Só quando a vez foi uma frase só, já terminada; senão, nada.
+     */
+    fun alternativas(): List<String> = if (frasesDaVez == 1) hipotesesDaFrase else emptyList()
 
     /** O volume do começo do som de agora, ou do último que acabou (dB): o mesmo que vai no [onSom], pra comparar igual com igual. */
     fun nivelDoUltimoSom(): Float = nivelDoSom
@@ -204,14 +217,15 @@ class Escuta(
         leitura = lado
         cano = ParcelFileDescriptor.AutoCloseOutputStream(ponta)
         val esta = sessao
-        val r = SpeechRecognizer.createSpeechRecognizer(ctx).also { reconhecedor = it }
+        val r = (if (servico != null) SpeechRecognizer.createSpeechRecognizer(ctx, servico) else SpeechRecognizer.createSpeechRecognizer(ctx)).also { reconhecedor = it }
         r.setRecognitionListener(Ouvido { esta == sessao && ativa })
         r.startListening(
             Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, idioma)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // as outras hipóteses vão pra IA ([alternativas])
                 .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, lado)
                 .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
                 .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
@@ -272,21 +286,24 @@ class Escuta(
 
         override fun onSegmentResults(segmentResults: Bundle) {
             if (!vale()) return
-            val texto = textoDe(segmentResults) ?: return
-            escreveu()
-            frases = "$frases $texto".trim()
-            publicar("")
+            fraseTerminada(segmentResults)
         }
 
         // Reconhecedor que não fatia em pedaços: o resultado final vale como uma frase, e a sessão recomeça
         override fun onResults(results: Bundle?) {
             if (!vale()) return
-            textoDe(results)?.let {
-                escreveu()
-                frases = "$frases $it".trim()
-                publicar("")
-            }
+            fraseTerminada(results)
             recomecar("resultado final")
+        }
+
+        private fun fraseTerminada(resultado: Bundle?) {
+            val hipoteses = hipotesesDe(resultado)
+            val texto = hipoteses.firstOrNull() ?: return
+            escreveu()
+            frases = "$frases $texto".trim()
+            frasesDaVez++
+            hipotesesDaFrase = hipoteses.drop(1)
+            publicar("")
         }
 
         override fun onEndOfSegmentedSession() {
@@ -312,8 +329,11 @@ class Escuta(
     }
 
     /** O texto mais provável de um resultado do reconhecedor, se tiver alguma palavra (com barulho ele manda ""). */
-    private fun textoDe(resultado: Bundle?): String? =
-        resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()?.takeIf { t -> t.any(Char::isLetterOrDigit) }
+    private fun textoDe(resultado: Bundle?): String? = hipotesesDe(resultado).firstOrNull()
+
+    /** As hipóteses de um resultado, da mais provável pra menos, só as com alguma palavra. */
+    private fun hipotesesDe(resultado: Bundle?): List<String> =
+        resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().map { it.trim() }.filter { t -> t.any(Char::isLetterOrDigit) }
 
     private companion object {
         const val TAXA = 16_000

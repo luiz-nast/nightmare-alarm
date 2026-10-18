@@ -71,6 +71,19 @@ fun somDaPessoa(db: Float, nivelDaPessoa: Float?): Boolean = nivelDaPessoa == nu
  */
 fun quantasPalavras(texto: String): Int = semAcento(texto).split(Regex("[^a-z0-9']+")).count { it.isNotEmpty() }
 
+/**
+ * O que a pessoa disse ([fala]) do jeito que vai pra IA, com as outras hipóteses do reconhecedor ([alternativas], da
+ * mais provável pra menos, até [ALTERNATIVAS_MAX], sem as iguais à fala): "Nice, I slept well\n(The speech recognizer
+ * also heard: "Knife, I slept well".)". A instrução manda a IA responder à versão que faz sentido, sem comentar.
+ */
+fun falaComAlternativas(fala: String, alternativas: List<String>): String {
+    val outras = alternativas.map { it.trim() }.filter { it.isNotEmpty() && !it.equals(fala.trim(), ignoreCase = true) }.distinct().take(ALTERNATIVAS_MAX)
+    if (outras.isEmpty()) return fala
+    return "$fala\n(The speech recognizer also heard: ${outras.joinToString(" / ") { "\"$it\"" }}.)"
+}
+
+const val ALTERNATIVAS_MAX = 2
+
 /** O volume da voz da pessoa, com mais um som dela que virou palavra ([db]): a média que anda, pra seguir ela chegando perto ou longe. */
 fun nivelDaVoz(anterior: Float?, db: Float): Float = if (anterior == null) db else anterior * 0.7f + db * 0.3f
 
@@ -323,7 +336,7 @@ fun instrucaoDoTreinador(noticias: List<String>, metas: String, hora: LocalTime)
     appendLine("- Never a yes or no question: start it with What, How, Why or Which, never with Are, Is, Do, Did, Have or Can.")
     appendLine("- A phone voice reads your words aloud: plain text only, no lists, no emojis, no markdown.")
     appendLine("- Speak simple, everyday English: he is Brazilian and still sleepy. If he answers in Portuguese, keep speaking English.")
-    appendLine("- His words come from speech recognition and may have mistakes: guess what he meant. If his answer seems cut in the middle, ask him to go on.")
+    appendLine("- His words come from speech recognition and may have mistakes: guess what he meant. When a line in parentheses says what the recognizer also heard, answer the version that makes sense, and never mention the recognizer. If his answer seems cut in the middle, ask him to go on.")
     appendLine("- Never suggest resting, sleeping, snoozing, staying in bed or \"five more minutes\". Never say that the alarm, the activity or the conversation is over, paused or shorter: you do not control them.")
     appendLine("- If he asks for more sleep, to stop or to end the alarm, say \"Not my call, sir.\" and ask a new question.")
     appendLine("- No medical advice.")
