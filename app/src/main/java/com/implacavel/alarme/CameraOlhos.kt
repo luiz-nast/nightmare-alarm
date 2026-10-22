@@ -1,5 +1,11 @@
+// A câmera frontal da missão com a detecção de rosto (ML Kit, no aparelho, sem internet), do serviço
+// ([CameraDaMissao]): aberta depois do bom dia, ela lê os olhos com a tela aberta ou fechada (serviço com o tipo
+// "camera", ganho no STOP com a tela na frente). A tela só mostra a imagem ([CameraOlhos]): liga o visor dela no
+// mesmo fluxo da câmera do serviço quando aparece, e solta quando some. Pedido do dono (10-22): fazer um post no
+// Instagram no meio da atividade sem a missão recomeçar; a câmera frontal continua vendo o rosto por baixo.
 package com.implacavel.alarme
 
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import android.util.Range
@@ -19,16 +25,17 @@ import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.Face
 import com.google.mlkit.vision.face.FaceDetection
@@ -57,46 +64,37 @@ private val IMAGEM_DO_CIRCULO = ResolutionSelector.Builder()
 /** Detector de rosto falhando em todo quadro analisado por uns 3 s é defeito. */
 private const val FALHAS_SEGUIDAS_MAX = (3_000 / ANALISE_A_CADA_MS).toInt()
 
+/** A última leitura da câmera do serviço: o que viu, a certeza de olho aberto (null sem rosto) e [quando] (SystemClock.elapsedRealtime). */
+data class LeituraDaCamera(val leitura: Leitura, val olhoAberto: Float?, val quando: Long)
+
 /**
- * Câmera frontal com detecção de rosto (ML Kit, roda no aparelho, sem internet). A cada quadro
- * analisado ([ANALISE_A_CADA_MS]) informa uma [Leitura] e o [olhoAberto] (null sem rosto). Com defeito
- * (não abre, erro grave da câmera ou o detector falhando em todo quadro), informa [Leitura.SEM_CAMERA].
+ * A câmera frontal com a detecção de rosto, fora da tela: vive no serviço, com um ciclo de vida só dela (o CameraX
+ * pede um; [ligar] e [desligar]). A cada quadro analisado ([ANALISE_A_CADA_MS]) informa [onLeitura] com uma [Leitura] e
+ * o [olhoAberto] (null sem rosto), lendo [exigente] na hora (depois da verificação do meio, os olhos têm que estar
+ * mais abertos). Com defeito (não abre, erro grave da câmera ou o detector falhando em todo quadro), informa
+ * [Leitura.SEM_CAMERA]. A imagem vai pra tela pelo [preview]: [CameraOlhos] liga o visor nele quando aparece.
  */
-@Composable
-fun CameraOlhos(modifier: Modifier, exigente: Boolean, onLeitura: (Leitura, olhoAberto: Float?) -> Unit) {
-    val ctx = LocalContext.current
-    val dono = LocalLifecycleOwner.current
-    val informar by rememberUpdatedState(onLeitura)
-    val exigenteAgora by rememberUpdatedState(exigente) // lido na thread da análise, a cada quadro
-    val visor = remember {
-        PreviewView(ctx).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE // permite recortar em círculo
-        }
-    }
-    val preview = remember { Preview.Builder().setTargetFrameRate(QUADROS_POR_SEGUNDO).setResolutionSelector(IMAGEM_DO_CIRCULO).build() }
-    val analise = remember { ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build() }
-    // A tela gira sem ser recriada (configChanges): sem isso, deitado, o detector veria o rosto de lado.
-    // Ler a configuração faz isto rodar de novo a cada giro
-    val rotacao = LocalConfiguration.current.let { LocalView.current.display?.rotation }
-    SideEffect {
-        rotacao?.let {
-            preview.targetRotation = it
-            analise.targetRotation = it
-        }
-    }
-    DisposableEffect(dono) {
-        var descartado = false
-        var camera: Camera? = null
-        var falhasSeguidas = 0 // só mexida na thread principal, onde o ML Kit entrega o resultado
-        var ultimaAnalise = 0L // só mexida na thread da análise
-        val executor = Executors.newSingleThreadExecutor()
-        val detector = FaceDetection.getClient(OPCOES_ROSTO)
-        val futuro = ProcessCameraProvider.getInstance(ctx)
-        futuro.addListener({
-            if (descartado) return@addListener
+class CameraDaMissao(private val ctx: Context, private val exigente: () -> Boolean, private val onLeitura: (Leitura, olhoAberto: Float?) -> Unit) : LifecycleOwner {
+    private val registro = LifecycleRegistry(this)
+    override val lifecycle: Lifecycle get() = registro
+
+    val preview: Preview = Preview.Builder().setTargetFrameRate(QUADROS_POR_SEGUNDO).setResolutionSelector(IMAGEM_DO_CIRCULO).build()
+    private val analise = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
+    private val executor = Executors.newSingleThreadExecutor()
+    private val detector: FaceDetector = FaceDetection.getClient(OPCOES_ROSTO)
+    private var futuro: ListenableFuture<ProcessCameraProvider>? = null
+    private var camera: Camera? = null
+    private var falhasSeguidas = 0 // só mexida na thread principal, onde o ML Kit entrega o resultado
+    private var ultimaAnalise = 0L // só mexida na thread da análise
+    private var desligada = false
+
+    /** Abre a câmera (na thread principal); os erros chegam por [onLeitura] como SEM_CAMERA. Uma vez só por objeto. */
+    fun ligar() {
+        registro.currentState = Lifecycle.State.STARTED
+        val f = ProcessCameraProvider.getInstance(ctx).also { futuro = it }
+        f.addListener({
+            if (desligada) return@addListener
             runCatching {
-                preview.setSurfaceProvider(visor.surfaceProvider)
                 analise.setAnalyzer(executor) { quadro ->
                     val agora = SystemClock.elapsedRealtime()
                     if (agora - ultimaAnalise < ANALISE_A_CADA_MS) {
@@ -105,37 +103,70 @@ fun CameraOlhos(modifier: Modifier, exigente: Boolean, onLeitura: (Leitura, olho
                     }
                     ultimaAnalise = agora
                     analisar(
-                        quadro, detector, { exigenteAgora },
+                        quadro, detector, exigente,
                         onLeitura = { leitura, aberto ->
                             falhasSeguidas = 0
-                            informar(leitura, aberto)
+                            onLeitura(leitura, aberto)
                         },
                         onFalha = {
                             if (++falhasSeguidas == FALHAS_SEGUIDAS_MAX) {
                                 Log.w(TAG, "Câmera: o detector de rosto falhou $FALHAS_SEGUIDAS_MAX vezes seguidas")
-                                informar(Leitura.SEM_CAMERA, null)
+                                onLeitura(Leitura.SEM_CAMERA, null)
                             }
                         },
                     )
                 }
-                val cameras = futuro.get()
+                val cameras = f.get()
                 cameras.unbindAll()
-                val aberta = cameras.bindToLifecycle(dono, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analise)
-                aberta.cameraInfo.cameraState.observe(dono) { estado -> estado.error?.let { tratarErro(it, informar) } }
+                val aberta = cameras.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analise)
+                aberta.cameraInfo.cameraState.observe(this) { estado -> estado.error?.let { tratarErro(it, onLeitura) } }
                 camera = aberta
-                Log.i(TAG, "Câmera: aberta")
+                Log.i(TAG, "Câmera: aberta (no serviço)")
             }.onFailure {
                 Log.w(TAG, "Câmera: não abriu", it)
-                informar(Leitura.SEM_CAMERA, null)
+                onLeitura(Leitura.SEM_CAMERA, null)
             }
         }, ContextCompat.getMainExecutor(ctx))
-        onDispose {
-            descartado = true
-            camera?.cameraInfo?.cameraState?.removeObservers(dono)
-            if (futuro.isDone) runCatching { futuro.get().unbindAll() }
-            detector.close()
-            executor.shutdown()
+    }
+
+    /** Fecha a câmera e solta o detector. Na thread principal. */
+    fun desligar() {
+        if (desligada) return
+        desligada = true
+        camera?.cameraInfo?.cameraState?.removeObservers(this)
+        futuro?.let { if (it.isDone) runCatching { it.get().unbindAll() } }
+        registro.currentState = Lifecycle.State.DESTROYED
+        detector.close()
+        executor.shutdown()
+        Log.i(TAG, "Câmera: fechada")
+    }
+
+    /** A tela girou: a imagem e a análise acompanham (deitado, o detector veria o rosto de lado). */
+    fun girar(rotacao: Int) {
+        preview.targetRotation = rotacao
+        analise.targetRotation = rotacao
+    }
+}
+
+/**
+ * O visor da [camera] do serviço, na tela: liga o visor ao fluxo da câmera quando aparece e solta quando some; a
+ * câmera e a detecção seguem no serviço de qualquer jeito.
+ */
+@Composable
+fun CameraOlhos(modifier: Modifier, camera: CameraDaMissao) {
+    val ctx = LocalContext.current
+    val visor = remember {
+        PreviewView(ctx).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE // permite recortar em círculo
         }
+    }
+    // A tela gira sem ser recriada (configChanges). Ler a configuração faz isto rodar de novo a cada giro
+    val rotacao = LocalConfiguration.current.let { LocalView.current.display?.rotation }
+    SideEffect { rotacao?.let(camera::girar) }
+    DisposableEffect(camera) {
+        camera.preview.setSurfaceProvider(visor.surfaceProvider)
+        onDispose { camera.preview.setSurfaceProvider(null) }
     }
     AndroidView(factory = { visor }, modifier = modifier)
 }

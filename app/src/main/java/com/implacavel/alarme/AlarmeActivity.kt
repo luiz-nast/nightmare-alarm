@@ -145,6 +145,9 @@ private fun TelaAlarme(alarme: Alarme) {
     val agora = agoraACada(1_000)
     // O GPS e o acelerômetro da caminhada são do serviço (ligados no STOP: durante a conversa o GPS já acerta a mira)
     val sentidos by AlarmeService.sentidos.collectAsStateWithLifecycle()
+    // A câmera da missão também é do serviço: a tela só liga o visor nela e pinta o que ela viu
+    val camera by AlarmeService.camera.collectAsStateWithLifecycle()
+    val leituraDaCamera by AlarmeService.leituraDaCamera.collectAsStateWithLifecycle()
 
     // A tela do alarme fica no brilho máximo do começo ao fim; na etapa da câmera, também clara, pra iluminar o rosto no escuro
     BrilhoMaximo()
@@ -237,13 +240,12 @@ private fun TelaAlarme(alarme: Alarme) {
             }
             else -> EtapaOlhar(
                 metaMs = metaCamera,
-                verificacaoMs = verificacaoEm(alarme, tempos),
                 onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
                 youtube = youtube,
                 pagina = pagina,
                 rolagem = rolagem,
-                onOlhando = { AlarmeService.olhando(ctx, it) },
-                onConcluiu = { AlarmeService.missaoCumprida(ctx) },
+                camera = camera,
+                leituraDaCamera = leituraDaCamera,
             )
         }
     }

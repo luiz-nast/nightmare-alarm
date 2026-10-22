@@ -91,13 +91,13 @@ private const val MUSICA_ALTA_MS = 5_000L
 private const val MUSICA_BAIXA_MS = 4_000L
 private const val VOLUME_ESCUTA = 0.25f
 
-private const val PASSO_MS = 100L
+const val PASSO_DA_CAMERA_MS = 100L
 
 /** De quanto em quanto tempo a etapa da câmera avisa o serviço que a pessoa está olhando. */
-private const val AVISO_OLHANDO_MS = 1_000L
+const val AVISO_OLHANDO_MS = 1_000L
 
 /** Sem quadro novo da câmera por esse tempo (câmera travada), a última leitura deixa de valer. Bem mais que o intervalo da análise (CameraOlhos). */
-private const val QUADRO_VELHO_MS = 1_500L
+const val QUADRO_VELHO_MS = 1_500L
 
 /** Páginas da etapa da câmera: o YouTube à esquerda (o dedo desliza pra direita) e a câmera, onde começa. */
 private const val PAGINA_YOUTUBE = 0
@@ -191,32 +191,14 @@ fun EtapaFalar(metaMs: Long, onStop: () -> Unit) {
 }
 
 /**
- * Verificação do meio da atividade ([AlarmeService.verificacao]): mostra a frase que a voz fala e, na vez
- * da pessoa, escuta em inglês até ela repetir ([repetiu]), mostrando o que ouve e pintando de verde as
- * palavras já ditas ([palavrasDitas]). Qualquer fala ouvida avisa o serviço, que conta o silêncio
- * (apitos e zerar); sem reconhecimento de voz, o serviço pula a verificação.
+ * Verificação do meio da atividade ([AlarmeService.verificacao]), só a tela: mostra a frase que a voz fala e, na vez
+ * da pessoa, o que o reconhecedor do serviço está ouvindo ([Verificacao.ouvido]), pintando de verde as palavras já
+ * ditas ([palavrasDitas]). Quem escuta, conta o silêncio (apitos e zerar) e pula a verificação sem reconhecimento de
+ * voz é o serviço: a verificação segue com a tela fechada.
  */
 @Composable
 fun EtapaVerificacao(passo: Verificacao) {
-    val ctx = LocalContext.current
-    var ouvido by remember(passo.frase) { mutableStateOf("") }
-    if (passo.suaVez) {
-        DisposableEffect(passo.frase) {
-            val ouvinte = Ouvinte(
-                ctx, "frase", aceita = { repetiu(passo.frase, it) },
-                onOuviu = {
-                    ouvido = it
-                    AlarmeService.ouviu(ctx)
-                },
-                onAceito = { AlarmeService.repetiu(ctx) },
-                onIndisponivel = { AlarmeService.semVozNaVerificacao(ctx) },
-                idioma = "en-US",
-                juntar = true, // com pausa no meio da frase, as palavras já ditas continuam valendo
-            )
-            ouvinte.comecar()
-            onDispose { ouvinte.parar() }
-        }
-    }
+    val ouvido = passo.ouvido
     val ultimaResposta by AlarmeService.ultimaResposta.collectAsStateWithLifecycle()
     var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {
@@ -363,12 +345,10 @@ fun EtapaFim() {
 }
 
 /**
- * Etapa 2: câmera num círculo com um anel que enche enquanto a pessoa olha de olhos abertos, até
- * somar [metaMs]; antes da verificação do meio (no serviço), para em [verificacaoMs]. [onOlhando] recebe o tempo já
- * somado a cada [AVISO_OLHANDO_MS] enquanto ela olha
- * e no instante em que ela para (mantém a música calada; o serviço guarda o tempo, em
- * [AlarmeService.olhado]). Sem olhar, a tela mostra a contagem pra zerar, a partir do último sinal
- * recebido pelo serviço ([AlarmeService.ultimoOlhar]); bipes e zerar são da vigia de lá.
+ * Etapa 2, só a tela: a [camera] do serviço num círculo com um anel que enche enquanto a pessoa olha de olhos
+ * abertos ([AlarmeService.olhado], somado lá a cada [PASSO_DA_CAMERA_MS] com a [leituraDaCamera]), até somar
+ * [metaMs]. Sem olhar, a contagem pra zerar, a partir do último sinal do relógio de lá ([AlarmeService.ultimoOlhar]);
+ * bipes e zerar são da vigia de lá. Tudo segue com a tela fechada; com ela aberta, a imagem aparece.
  *
  * Deslizando pra direita, a página do [youtube]: a câmera vira uma bolinha no canto (CameraMovel) e
  * continua valendo. Lá o deslize de lado fica desligado (o dedo é dos vídeos: um Short puxado pra cima
@@ -378,13 +358,12 @@ fun EtapaFim() {
 @Composable
 fun EtapaOlhar(
     metaMs: Long,
-    verificacaoMs: Long,
     onDefeito: () -> Unit,
     youtube: YoutubeDaMissao,
     pagina: @Composable (conteudo: @Composable () -> Unit) -> Unit,
     rolagem: ScrollState,
-    onOlhando: (olhadoMs: Long) -> Unit,
-    onConcluiu: () -> Unit,
+    camera: CameraDaMissao?,
+    leituraDaCamera: LeituraDaCamera,
 ) {
     val ctx = LocalContext.current
     // Tirar a permissão da câmera não é saída: sem ela, o único caminho é liberar de novo
@@ -393,61 +372,28 @@ fun EtapaOlhar(
         pagina { PedirCamera(onLiberada = { respostas++ }) }
         return
     }
-    var leitura by remember { mutableStateOf(Leitura.SEM_ROSTO) }
-    var aberto by remember { mutableStateOf<Float?>(null) } // a certeza de olho aberto do último quadro
-    var quandoLeu by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    if (leitura == Leitura.SEM_CAMERA) {
+    if (leituraDaCamera.leitura == Leitura.SEM_CAMERA) {
         // A câmera deu defeito (a permissão existe): sem como conferir os olhos, desliga no botão
         pagina { AvisoComBotao("The camera is not working.", "TURN OFF", fundoClaro = true, onClick = onDefeito) }
         return
     }
-    val avisarOlhando by rememberUpdatedState(onOlhando)
-    val concluir by rememberUpdatedState(onConcluiu)
-    // A meta pode subir no meio: alarme de verdade disparando durante o teste (EmAndamento.juntar)
-    val meta by rememberUpdatedState(metaMs)
-    val verificacao by rememberUpdatedState(verificacaoMs)
-    // Continua do que o serviço guardou: voltou depois de sair da tela, ou a tela foi recriada no meio
-    // (ex.: o tamanho da fonte do sistema mudou). Lá ele só zera nos 20 s sem olhar
-    var olhadoMs by remember { mutableLongStateOf(AlarmeService.olhado.value) }
-    var zeraEm by remember { mutableStateOf<Int?>(null) }
-    // Depois da verificação do meio, a câmera fica mais exigente com os olhos
-    val metadeVerificada by AlarmeService.metadeVerificada.collectAsStateWithLifecycle()
+    // A câmera, o anel e a contagem pra zerar são do serviço (seguem com a tela fechada): aqui só se desenha
+    var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {
-        var antes = SystemClock.elapsedRealtime()
-        var ultimoAviso = 0L
-        var olhavaAntes = false
         while (true) {
-            delay(PASSO_MS)
-            val agora = SystemClock.elapsedRealtime()
-            // Câmera travada vale como sem rosto: imagem velha não enche o anel
-            if (agora - quandoLeu > QUADRO_VELHO_MS) {
-                leitura = Leitura.SEM_ROSTO
-                aberto = null
-            }
-            // Vale o quadro atual: tirou o rosto ou fechou os olhos, o anel para na hora
-            val olhando = leitura == Leitura.OLHANDO
-            if (olhando != olhavaAntes) {
-                val olho = aberto?.let { ", olho ${porcento(it)}%" }.orEmpty()
-                Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}$olho, anel ${olhadoMs * 100 / meta}%")
-            }
-            // Antes da verificação do meio (no serviço), o anel para no fim do modo fácil
-            val limite = if (AlarmeService.metadeVerificada.value) meta else verificacao
-            olhadoMs = minOf(avancarOlhar(olhadoMs, olhando, passoMs = agora - antes), maxOf(limite, olhadoMs))
-            antes = agora
-            // A cada segundo olhando, e no instante em que parou: a contagem pra zerar começa daí
-            if (olhando && agora - ultimoAviso >= AVISO_OLHANDO_MS || olhavaAntes && !olhando) {
-                avisarOlhando(olhadoMs)
-                ultimoAviso = agora
-            }
-            olhavaAntes = olhando
-            zeraEm = if (olhando) null else segundosParaZerar(agora - AlarmeService.ultimoOlhar.value)
-            if (olhadoMs >= meta) {
-                Log.i(TAG, "Missão: anel completo, alarme desligado")
-                concluir()
-                break
-            }
+            delay(PASSO_DA_CAMERA_MS)
+            agora = SystemClock.elapsedRealtime()
         }
     }
+    val olhadoMs by AlarmeService.olhado.collectAsStateWithLifecycle()
+    val ultimoOlhar by AlarmeService.ultimoOlhar.collectAsStateWithLifecycle()
+    // Depois da verificação do meio, a câmera fica mais exigente com os olhos
+    val metadeVerificada by AlarmeService.metadeVerificada.collectAsStateWithLifecycle()
+    // Câmera travada vale como sem rosto: imagem velha não enche o anel (o serviço faz a mesma conta)
+    val velha = agora - leituraDaCamera.quando > QUADRO_VELHO_MS
+    val leitura = if (velha) Leitura.SEM_ROSTO else leituraDaCamera.leitura
+    val aberto = if (velha) null else leituraDaCamera.olhoAberto
+    val zeraEm = if (leitura == Leitura.OLHANDO) null else segundosParaZerar(agora - ultimoOlhar)
 
     val (corAlvo, mensagem) = retorno(leitura)
     val cor by animateColorAsState(corAlvo, label = "cor da leitura")
@@ -501,12 +447,7 @@ fun EtapaOlhar(
             cor = cor,
             legenda = zeraEm?.let { "$it s to reset" } ?: "${tempoRestante(metaMs - olhadoMs)} left",
             alerta = zeraEm != null,
-            exigente = metadeVerificada,
-            onLeitura = { nova, olho ->
-                leitura = nova
-                aberto = olho
-                quandoLeu = SystemClock.elapsedRealtime()
-            },
+            camera = camera,
         )
     }
 }
@@ -528,8 +469,7 @@ private fun CameraMovel(
     cor: Color,
     legenda: String,
     alerta: Boolean,
-    exigente: Boolean,
-    onLeitura: (Leitura, olhoAberto: Float?) -> Unit,
+    camera: CameraDaMissao?,
 ) {
     val escopo = rememberCoroutineScope()
     val densidade = LocalDensity.current
@@ -620,7 +560,7 @@ private fun CameraMovel(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            CameraOlhos(Modifier.size(circulo - 32.dp).clip(CircleShape), exigente, onLeitura)
+            camera?.let { CameraOlhos(Modifier.size(circulo - 32.dp).clip(CircleShape), it) }
             AnelProgresso(progresso, cor, Modifier.fillMaxSize())
         }
         // Em cima da bolinha, o tempo que falta ou, em vermelho, a contagem pra zerar (só na página do YouTube)
