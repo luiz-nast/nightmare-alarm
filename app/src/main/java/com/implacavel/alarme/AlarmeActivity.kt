@@ -148,11 +148,9 @@ private fun TelaAlarme(alarme: Alarme) {
     // A câmera da missão também é do serviço: a tela só liga o visor nela e pinta o que ela viu
     val camera by AlarmeService.camera.collectAsStateWithLifecycle()
     val leituraDaCamera by AlarmeService.leituraDaCamera.collectAsStateWithLifecycle()
-    // O cadeado do menu de desligar, ou o pedido pra ligar a vigia pelo atalho de acessibilidade (sem o cabo)
+    // O cadeado: a vigia do menu de desligar está no ar (o app liga quando o alarme toca, com a permissão do cabo)
     val vigiaNoAr by VigiaDoDesligar.noAr.collectAsStateWithLifecycle()
-    val vigiaAutomatica = remember { VigiaDoDesligar.podeLigar(ctx) }
-    val atalhoDaVigia = remember { VigiaDoDesligar.atalho(ctx) }
-    val aviso = avisoDaVigia(vigiaNoAr, vigiaAutomatica, atalhoDaVigia)
+    val aviso = if (vigiaNoAr) "🔒 Power menu blocked" else null
 
     // A tela do alarme fica no brilho máximo do começo ao fim; na etapa da câmera, também clara, pra iluminar o rosto no escuro
     BrilhoMaximo()

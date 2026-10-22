@@ -1,5 +1,4 @@
-// Teste da vigia do menu de desligar, sem som e sem tela: diz qual atalho de acessibilidade a liga; com a permissão do
-// cabo, o app liga a vigia, espera o Android pôr o serviço no ar
+// Teste da vigia do menu de desligar, sem som e sem tela: o app liga a vigia, espera o Android pôr o serviço no ar
 // (até [ESPERA_MS]), escreve no log se deu certo e desliga de novo. Serve pra ver, depois de dar a permissão pelo cabo,
 // se este celular deixa o app ligar a acessibilidade sozinho. Só pelo cabo (permissão DUMP, como o TesteDaIa):
 //   adb shell am broadcast -n com.implacavel.alarme/.TesteDaVigia
@@ -23,10 +22,8 @@ class TesteDaVigia : BroadcastReceiver() {
             Log.w(TAG, "Teste da vigia: com um alarme tocando, não roda")
             return
         }
-        // O atalho de acessibilidade que liga a vigia sem o cabo (null = nenhum, ou o Android não deixou ler)
-        Log.i(TAG, "Teste da vigia: atalho ${VigiaDoDesligar.atalho(ctx) ?: "nenhum"}, no ar ${VigiaDoDesligar.noAr.value}")
         if (!VigiaDoDesligar.podeLigar(ctx)) {
-            Log.w(TAG, "Teste da vigia: sem a WRITE_SECURE_SETTINGS (pm grant pelo cabo): a vigia liga só pelo atalho")
+            Log.w(TAG, "Teste da vigia: falta a WRITE_SECURE_SETTINGS (pm grant pelo cabo)")
             return
         }
         val app = ctx.applicationContext

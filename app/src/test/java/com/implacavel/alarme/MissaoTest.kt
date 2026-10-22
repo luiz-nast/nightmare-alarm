@@ -194,16 +194,6 @@ class MissaoTest {
     }
 
     @Test
-    fun avisoDaVigiaPedeOAtalhoSoQuandoFazSentido() {
-        assertEquals("🔒 Power menu blocked", avisoDaVigia(noAr = true, automatica = false, atalho = null))
-        assertEquals("Hold both volume keys for 3 s to block the power menu", avisoDaVigia(noAr = false, automatica = false, atalho = AtalhoDaVigia.VOLUME))
-        assertEquals("Tap the accessibility button to block the power menu", avisoDaVigia(noAr = false, automatica = false, atalho = AtalhoDaVigia.BOTAO))
-        // Com a permissão do cabo, o app liga sozinho: nada a pedir. Sem atalho nem permissão, nada também
-        assertNull(avisoDaVigia(noAr = false, automatica = true, atalho = AtalhoDaVigia.VOLUME))
-        assertNull(avisoDaVigia(noAr = false, automatica = false, atalho = null))
-    }
-
-    @Test
     fun listaDeAcessibilidadeLigaEDesligaSoAVigia() {
         val nosso = "com.implacavel.alarme/com.implacavel.alarme.VigiaDoDesligar"
         val curto = "com.implacavel.alarme/.VigiaDoDesligar"
