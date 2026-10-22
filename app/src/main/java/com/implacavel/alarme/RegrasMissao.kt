@@ -207,6 +207,21 @@ fun segundosParaZerar(semOlharMs: Long): Int? =
 fun volumeDoBipe(n: Int, maximo: Int, degraus: Int = BIPES_ATE_ZERAR): Int =
     (maximo * n.coerceIn(1, degraus).toFloat() / degraus).roundToInt().coerceAtLeast(1)
 
+/**
+ * A janela que apareceu é o menu de desligar do celular ([VigiaDoDesligar])? Pela classe (a do Android puro tem
+ * "GlobalActions" no nome) ou pelos [textos] dela: "Power off" ou "Restart" (em inglês ou português), que só esse menu
+ * tem juntos com o nome de pacote da interface do sistema. Sem o pacote do sistema, não é.
+ */
+fun ehMenuDeDesligar(pacote: String?, classe: String?, textos: List<String>): Boolean {
+    if (pacote == null || !PACOTES_DO_SISTEMA.any { pacote == it || pacote.startsWith("$it.") }) return false
+    if (classe?.contains("GlobalActions", ignoreCase = true) == true) return true
+    val tudo = textos.joinToString(" ").lowercase()
+    return TEXTOS_DO_MENU_DE_DESLIGAR.any { it in tudo }
+}
+
+private val PACOTES_DO_SISTEMA = listOf("com.android.systemui", "com.samsung.android.globalactions", "android")
+private val TEXTOS_DO_MENU_DE_DESLIGAR = listOf("power off", "desligar", "restart", "reiniciar")
+
 /** Sites que a página do YouTube abre: o próprio YouTube e o Google (aviso de cookies e login). */
 private val SITES_DA_PAGINA = listOf("youtube.com", "youtu.be", "google.com", "google.com.br")
 

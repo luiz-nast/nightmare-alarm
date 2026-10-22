@@ -177,6 +177,20 @@ class MissaoTest {
     }
 
     @Test
+    fun menuDeDesligarPelaClasseOuPelosTextos() {
+        // O Android puro: a classe do menu; a Samsung: os textos dos botões
+        assertTrue(ehMenuDeDesligar("com.android.systemui", "com.android.systemui.globalactions.GlobalActionsDialogLite", emptyList()))
+        assertTrue(ehMenuDeDesligar("com.android.systemui", "android.widget.FrameLayout", listOf("Power off", "Restart", "Emergency call")))
+        assertTrue(ehMenuDeDesligar("com.android.systemui", null, listOf("Desligar", "Reiniciar")))
+        assertTrue(ehMenuDeDesligar("com.samsung.android.globalactions.ui", null, listOf("Power off")))
+        // Outra janela do sistema (a barra de notificações, um aviso) não é
+        assertFalse(ehMenuDeDesligar("com.android.systemui", "android.widget.FrameLayout", listOf("Wi-Fi", "Bluetooth", "Battery 80%")))
+        // Um app comum com o texto "restart" (um jogo, uma página) não é
+        assertFalse(ehMenuDeDesligar("com.instagram.android", "GlobalActionsDialog", listOf("Power off")))
+        assertFalse(ehMenuDeDesligar(null, "GlobalActionsDialog", listOf("Power off")))
+    }
+
+    @Test
     fun fasesDosBotoesDoTeste() {
         // Conversa + caminhada: conversa › prazo › caminhada
         assertEquals(FaseDoTeste.CONVERSA, faseDoTeste(conversa = true, caminhada = false, noPrazo = false, verificacao = false, metadeVerificada = false, naCamera = false))

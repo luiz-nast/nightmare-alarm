@@ -99,6 +99,21 @@
                 android:value="Toca o alarme (som, vibração e tela cheia) até o usuário desligar" />
         </service>
 
+        <!-- A vigia do menu de desligar: serviço de acessibilidade (o dono liga nas Configurações), que fecha o menu de
+             desligar e reiniciar enquanto um alarme toca. Veja VigiaDoDesligar.kt -->
+        <service
+            android:name=".VigiaDoDesligar"
+            android:exported="true"
+            android:label="@string/vigia_do_desligar_nome"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/vigia_do_desligar" />
+        </service>
+
         <!-- Teste da IA do celular, sem som: só pelo cabo (o adb tem a permissão DUMP; app comum, não). Veja TesteDaIa.kt -->
         <receiver
             android:name=".TesteDaIa"

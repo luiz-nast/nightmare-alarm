@@ -31,7 +31,11 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     ALARME_EXATO("Alarm on the exact minute", "Rings on time even with the phone asleep."),
     TELA_CHEIA("Full screen", "Lets the alarm take over the screen, even when locked."),
     CANAL("Prominent alert", "The \"Alarm ringing\" channel needs high importance."),
-    BATERIA("Unrestricted battery", "Keeps the phone from putting the app to sleep.");
+    BATERIA("Unrestricted battery", "Keeps the phone from putting the app to sleep."),
+    MENU_DE_DESLIGAR(
+        "Block the power menu",
+        "While the alarm rings, the power off / restart menu closes by itself. Turn on \"Nightmare Alarm\" in Accessibility › Installed apps.",
+    );
 
     fun liberado(ctx: Context): Boolean = when (this) {
         NOTIFICACOES -> NotificationManagerCompat.from(ctx).areNotificationsEnabled()
@@ -45,6 +49,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
             canal == null || canal.importance >= NotificationManager.IMPORTANCE_HIGH
         }
         BATERIA -> ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
+        MENU_DE_DESLIGAR -> VigiaDoDesligar.ligado(ctx)
     }
 
     /** A permissão do diálogo do sistema, se ainda falta; null se já foi dada ou se este poder não tem diálogo. */
@@ -82,6 +87,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
             .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
             .putExtra(Settings.EXTRA_CHANNEL_ID, Notificacoes.CANAL_ALARME)
         BATERIA -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pacote(ctx))
+        MENU_DE_DESLIGAR -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
     }
 
     private fun pacote(ctx: Context) = "package:${ctx.packageName}".toUri()
