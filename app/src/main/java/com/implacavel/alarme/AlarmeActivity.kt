@@ -240,7 +240,7 @@ private fun TelaAlarme(alarme: Alarme) {
             }
             else -> EtapaOlhar(
                 metaMs = metaCamera,
-                onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
+                onDefeito = { AlarmeService.missaoCumprida(ctx) },
                 youtube = youtube,
                 pagina = pagina,
                 rolagem = rolagem,

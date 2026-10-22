@@ -616,13 +616,9 @@ private fun desvio(valores: Collection<Float>): Float {
 /**
  * Quando (SystemClock.elapsedRealtime) toca o 1º bipe de parado: [PARADO_MS] depois do último sinal de
  * "andando" ([ultimoPasso]) ou do fim do prazo pra sair ([prazoAte]), o que vier depois. Os seguintes, a
- * cada [ENTRE_BIPES_PARADO_MS]. A vigia do serviço e a contagem na tela ([segundosProBipe]) contam daqui.
+ * cada [ENTRE_BIPES_PARADO_MS]. A vigia do serviço conta daqui; a barra na tela usa [paradoHa] e [bipeDoParado].
  */
 fun primeiroBipeParado(ultimoPasso: Long, prazoAte: Long): Long = maxOf(ultimoPasso, prazoAte) + PARADO_MS
-
-/** Contagem na tela, parado depois do prazo pra sair: segundos até o 1º bipe (0 = já bipando). Null ainda no prazo. */
-fun segundosProBipe(agora: Long, ultimoPasso: Long, prazoAte: Long): Int? =
-    if (agora < prazoAte) null else ceil((primeiroBipeParado(ultimoPasso, prazoAte) - agora) / 1000.0).toInt().coerceAtLeast(0)
 
 /** Há quanto tempo (ms) sem sinal de vida depois do prazo pra sair, pra barra do bipe na tela; null ainda no prazo. */
 fun paradoHa(agora: Long, ultimoPasso: Long, prazoAte: Long): Long? =

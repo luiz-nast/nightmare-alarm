@@ -41,8 +41,8 @@ import java.time.LocalTime
  * - na metade, o anel para e vem a verificação: a voz fala 5 frases ([frasesDoDia]) e a pessoa repete
  *   cada uma; sem responder por [SILENCIO_APITO_MS], um apito alto, e em [SILENCIO_ZERA_MS] o anel zera e a
  *   música volta. Depois dela, a câmera fica mais exigente com os olhos;
- *   daí a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
- *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
+ *   daí a música só fica calada enquanto o relógio da câmera ([tiqueDaCamera]) vê a pessoa
+ *   olhando; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
  *   volume máximo do celular; no teste, 40%), e em [DESISTENCIA_MS] religa a música (o anel zera);
  * - a cada [RENOVAR_MS], empurra pra frente a retomada no AlarmManager: se o app cair, travar ou
  *   for encerrado, ou se o celular desligar, o alarme volta sozinho;
@@ -53,8 +53,8 @@ import java.time.LocalTime
  *   ([MotorDaConversa], no celular) e a caminhada pelo GPS, chova ou faça sol, com ou sem internet (sem a IA,
  *   direto pra caminhada). Quem decide tudo são os relógios daqui: a IA só produz o texto das falas.
  *
- * Comandos pela action do Intent, cada um com uma função no companion: tocar, missão cumprida,
- * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz, ondas, mini tarefa, fase e cancelar teste. Na
+ * Comandos pela action do Intent, cada um com uma função no companion: tocar, missão cumprida (defeito ou cabo),
+ * desligar, reexibir, tela, silenciar, volume, dar tempo, ondas, fase e cancelar teste. Na
  * conversa, quem ouve é a [Escuta], daqui mesmo; na caminhada, o GPS e os passos ([SentidosDaCaminhada]) e o relógio
  * deles ([ContadorDaCaminhada]) também são daqui: a conversa e a caminhada seguem com a tela fechada.
  * O comando reexibir vem da notificação arrastada pro lado.
@@ -110,12 +110,10 @@ class AlarmeService : Service() {
         private const val ACAO_VOLUME = "volume"
         private const val ACAO_DAR_TEMPO = "dar_tempo"
         private const val ACAO_ONDAS = "ondas"
-        private const val ACAO_MINI_TAREFA = "mini_tarefa"
         private const val ACAO_FASE = "fase"
         private const val ACAO_CANCELAR_TESTE = "cancelar_teste"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
-        private const val EXTRA_COMEMORAR = "comemorar"
         private const val EXTRA_LIGADAS = "ligadas"
         private const val EXTRA_FASE = "fase"
 
@@ -213,7 +211,7 @@ class AlarmeService : Service() {
 
         private val _verificacao = MutableStateFlow<Verificacao?>(null)
 
-        /** A verificação do meio em andamento (null = fora dela): a tela mostra a frase e, na vez da pessoa, escuta. */
+        /** A verificação do meio em andamento (null = fora dela): a tela mostra a frase e, na vez da pessoa, o que o reconhecedor do serviço ouve. */
         val verificacao: StateFlow<Verificacao?> = _verificacao.asStateFlow()
 
         private val _metadeVerificada = MutableStateFlow(false)
@@ -245,7 +243,7 @@ class AlarmeService : Service() {
 
         private val _conversa = MutableStateFlow<Conversa?>(null)
 
-        /** A conversa da manhã com a IA em andamento (null = fora dela): a tela mostra a fala da IA e, na vez da pessoa, escuta. */
+        /** A conversa da manhã com a IA em andamento (null = fora dela): a tela mostra a fala da IA e, na vez da pessoa, o que a [Escuta] do serviço ouviu. */
         val conversa: StateFlow<Conversa?> = _conversa.asStateFlow()
 
         private val _ultimaFala = MutableStateFlow(0L)
@@ -255,7 +253,7 @@ class AlarmeService : Service() {
 
         private val _caminhada = MutableStateFlow<Caminhada?>(null)
 
-        /** A caminhada da manhã em andamento, com o prazo pra sair de casa (null = fora dela): a tela conta o tempo andando pelo GPS. */
+        /** A caminhada da manhã em andamento, com o prazo pra sair de casa (null = fora dela): o [ContadorDaCaminhada] do serviço soma o tempo andando; a tela só mostra. */
         val caminhada: StateFlow<Caminhada?> = _caminhada.asStateFlow()
 
         private val _ultimoPasso = MutableStateFlow(0L)
@@ -289,7 +287,7 @@ class AlarmeService : Service() {
 
         private val _miniTarefa = MutableStateFlow<MiniTarefa?>(null)
 
-        /** A mini tarefa do prazo pra sair oferecida agora (null = nenhuma): a tela mostra a frase e, na vez da pessoa, escuta. */
+        /** A mini tarefa do prazo pra sair oferecida agora (null = nenhuma): a tela mostra a frase e, na vez da pessoa, o que o reconhecedor do serviço ouve. */
         val miniTarefa: StateFlow<MiniTarefa?> = _miniTarefa.asStateFlow()
 
         private val _temposDoAlarme = MutableStateFlow(TEMPOS_PADRAO)
@@ -308,10 +306,11 @@ class AlarmeService : Service() {
                 .onFailure { Log.e(TAG, "Serviço: o Android não deixou começar a tocar", it) }
         }
 
-        /** O anel da câmera fechou (ou a câmera deu defeito): fim do alarme. */
-        fun missaoCumprida(ctx: Context, comemorar: Boolean = true) {
-            ctx.startService(comando(ctx, ACAO_CONCLUIR).putExtra(EXTRA_COMEMORAR, comemorar))
-        }
+        /**
+         * Defeito da câmera, ou a saída de emergência pelo cabo: fim do alarme, sem comemoração. O anel completo e a
+         * caminhada completa terminam aqui dentro mesmo ([concluir]), sem passar por este comando.
+         */
+        fun missaoCumprida(ctx: Context) { ctx.startService(comando(ctx, ACAO_CONCLUIR)) }
 
         /** Botão DESLIGAR. Só vale pra alarme sem missão (ou liberado por defeito). */
         fun desligar(ctx: Context) { ctx.startService(comando(ctx, ACAO_DESLIGAR)) }
@@ -333,9 +332,6 @@ class AlarmeService : Service() {
 
         /** O botão das ondas na tela da caminhada: [ligadas] ou mudas, nesta manhã. */
         fun ondas(ctx: Context, ligadas: Boolean) { ctx.startService(comando(ctx, ACAO_ONDAS).putExtra(EXTRA_LIGADAS, ligadas)) }
-
-        /** A pessoa repetiu a frase da mini tarefa: mais prazo pra sair ([preparoExtra]). */
-        fun miniTarefaFeita(ctx: Context) { ctx.startService(comando(ctx, ACAO_MINI_TAREFA)) }
 
         /** Os botões "Back" e "Forward" de um alarme de teste: a manhã pula pra [fase] ([FaseDoTeste]). Num alarme de verdade, nada. */
         fun irPraFase(ctx: Context, fase: FaseDoTeste) { ctx.startService(comando(ctx, ACAO_FASE).putExtra(EXTRA_FASE, fase.name)) }
@@ -605,7 +601,7 @@ class AlarmeService : Service() {
             acao == ACAO_TOCAR -> iniciar()
             // Comando atrasado, de quando o alarme já tinha parado: só fecha o serviço
             alarme == null -> pararServico()
-            acao == ACAO_CONCLUIR -> concluir(comemorar = intent.getBooleanExtra(EXTRA_COMEMORAR, false))
+            acao == ACAO_CONCLUIR -> concluir(comemorar = false)
             // Nem repetindo o DESLIGAR de outro alarme (a notificação sempre traz o mesmo) dá pra fugir da missão
             acao == ACAO_DESLIGAR -> if (!alarme.missao) concluir()
             // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme durar
@@ -616,7 +612,6 @@ class AlarmeService : Service() {
             acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
             acao == ACAO_DAR_TEMPO -> foraAte = SystemClock.elapsedRealtime() + TEMPO_FORA_MS
             acao == ACAO_ONDAS -> ondas(intent.getBooleanExtra(EXTRA_LIGADAS, true))
-            acao == ACAO_MINI_TAREFA -> miniTarefaFeita()
             // Os botões de fase e de cancelar só existem na tela de um alarme de teste; um comando atrasado não mexe num alarme de verdade
             acao == ACAO_FASE -> if (alarme.deTeste) intent.getStringExtra(EXTRA_FASE)?.let { nome -> FaseDoTeste.entries.firstOrNull { it.name == nome } }?.let(::irPraFase)
             acao == ACAO_CANCELAR_TESTE -> if (alarme.deTeste && !cumprido) {
@@ -1662,7 +1657,7 @@ class AlarmeService : Service() {
 
     /**
      * A caminhada, com o prazo pra sair de casa (marcado no relógio na primeira vez; a música voltar não dá mais
-     * prazo): a tela conta o tempo andando pelo GPS e a vigia bipa quem fica parado depois do prazo.
+     * prazo): o [ContadorDaCaminhada] soma o tempo andando pelo GPS e pelos passos, e a vigia bipa quem fica parado depois do prazo.
      */
     private fun comecarCaminhada() {
         val alarme = _tocando.value ?: return

@@ -6,7 +6,7 @@ plugins {
 }
 
 // Ajustes deste PC, fora do git (local.properties). Nenhuma chave de IA entra no app: a conversa da manhã usa um
-// modelo no próprio celular (o Gemini, guardado em reserva/gemini, usava GEMINI_API_KEY; veja o README.md de lá)
+// modelo no próprio celular
 val locais = Properties().apply {
     val arquivo = rootProject.file("local.properties")
     if (arquivo.exists()) arquivo.inputStream().use { load(it) }

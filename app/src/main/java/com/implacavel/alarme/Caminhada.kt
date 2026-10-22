@@ -76,10 +76,10 @@ import kotlin.math.sqrt
 /** O GPS manda um fixo por segundo, mesmo parado: o mais rápido que o GPS do celular dá. */
 private const val INTERVALO_GPS_MS = 1_000L
 
-/** De quanto em quanto tempo a etapa confere o relógio: contagens, fixo velho e o aviso pro serviço. */
+/** De quanto em quanto tempo o [ContadorDaCaminhada] confere o relógio (e a tela se redesenha): contagens, fixo velho e o sinal de vida. */
 private const val CONFERIR_MS = 250L
 
-/** De quanto em quanto tempo, andando, a etapa avisa o serviço. */
+/** De quanto em quanto tempo, andando, o [ContadorDaCaminhada] dá o sinal de vida (aoViver). */
 private const val AVISO_ANDANDO_MS = 1_000L
 
 /** Sem fixo novo por esse tempo (o GPS manda um por segundo), o último deixa de valer: "sem sinal", e parado. */
@@ -112,11 +112,12 @@ private const val TRILHA_LADO_MIN_M = 40.0
 
 /**
  * O GPS (um fixo por segundo), o acelerômetro e os satélites da caminhada, com o [detector] que lê os três. Ligados
- * desde o STOP de uma manhã com caminhada ([rememberSentidosDaCaminhada]): o GPS acerta a mira durante a conversa e,
- * na hora de sair, já está pronto (a ideia do dono; ligado só na caminhada, o 1º minuto dela era o GPS escorregando
- * e saltando). Vivem na tela do alarme, não no serviço (a localização "durante o uso" só vale com a tela aberta), e
- * passam da conversa pra caminhada sem desligar. Só a etapa da caminhada ([aoAvaliar]) soma tempo e desenha a
- * trilha; antes, o caminho anda (pra saber de onde a pessoa saiu) sem contar. Cada fixo vai pro log ([detalheDoFixo],
+ * pelo serviço desde o STOP de uma manhã com caminhada (AlarmeService.ligarSentidos; no TesteDoGps, pela tela, com
+ * [rememberSentidosDaCaminhada]): o GPS acerta a mira durante a conversa e, na hora de sair, já está pronto (a ideia
+ * do dono; ligado só na caminhada, o 1º minuto dela era o GPS escorregando e saltando). Vivem no serviço, não na tela
+ * (serviço com o tipo "location", ganho no STOP com a tela na frente), pra caminhada seguir com a tela fechada ou no
+ * bolso, e passam da conversa pra caminhada sem desligar. Só o relógio da caminhada ([ContadorDaCaminhada], via
+ * [aoAvaliar]) soma tempo e desenha a trilha; antes, o caminho anda (pra saber de onde a pessoa saiu) sem contar. Cada fixo vai pro log ([detalheDoFixo],
  * sem coordenadas): na caminhada de 10-17 à noite só havia o resumo de 30 s, e não deu pra saber por que os passos
  * sumiram.
  */
@@ -137,7 +138,7 @@ class SentidosDaCaminhada {
     var semGps by mutableStateOf(false)
         internal set
 
-    /** A etapa da caminhada na tela: recebe cada avaliação e soma. Null antes dela (o GPS esquentando). */
+    /** Posto pelo [ContadorDaCaminhada]: recebe cada avaliação e soma. Null antes dele (o GPS esquentando). */
     internal var aoAvaliar: ((Avaliacao) -> Unit)? = null
 
     /** O sinal médio dos 4 satélites mais fortes da banda L1 (dB-Hz), pro log; null sem satélite. */
@@ -351,7 +352,7 @@ fun rememberSentidosDaCaminhada(): SentidosDaCaminhada {
  * Etapa da caminhada, só a tela: o anel com o tempo andando ([andadoMs], somado pelo serviço com o [ContadorDaCaminhada]
  * sobre os [sentidos] dele) até [metaMs], com o que ainda está conferindo ([conferindoMs]) mais claro. Até [prazoAte]
  * (SystemClock.elapsedRealtime) é o prazo pra sair de casa: andar nele já conta, e a tela mostra quanto falta; depois,
- * parado, a contagem pro bipe a partir do último sinal de vida recebido pelo serviço ([ultimoPasso], [segundosProBipe]).
+ * parado, a contagem pro bipe a partir do último sinal de vida recebido pelo serviço ([ultimoPasso], [paradoHa], [bipeDoParado]).
  * Tudo o que decide (somar, bipar, concluir) é do serviço, que segue com a tela fechada: aqui só se desenha.
  *
  * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada

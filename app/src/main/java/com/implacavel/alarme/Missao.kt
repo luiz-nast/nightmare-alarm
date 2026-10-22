@@ -93,7 +93,7 @@ private const val VOLUME_ESCUTA = 0.25f
 
 const val PASSO_DA_CAMERA_MS = 100L
 
-/** De quanto em quanto tempo a etapa da câmera avisa o serviço que a pessoa está olhando. */
+/** De quanto em quanto tempo, olhando, o relógio da câmera do serviço (AlarmeService.tiqueDaCamera) dá o sinal de vida (olhou). */
 const val AVISO_OLHANDO_MS = 1_000L
 
 /** Sem quadro novo da câmera por esse tempo (câmera travada), a última leitura deixa de valer. Bem mais que o intervalo da análise (CameraOlhos). */

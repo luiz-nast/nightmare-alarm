@@ -1,8 +1,7 @@
 // O "cérebro" da conversa da manhã: recebe o que a pessoa disse e devolve a próxima fala da IA, só texto. A voz,
 // a vez de cada um, o relógio e o fim são do AlarmeService. O motor é o Gemma no próprio celular ([ModeloLocal]),
 // sem internet (só a busca que ele pede, [Pesquisa], e as manchetes vão pela rede). Sem o modelo no celular, o
-// despertador "conversa + caminhada" vai direto pra caminhada. O Gemini, pela internet, fica guardado em
-// reserva/gemini (fora do app), pronto pra voltar se o modelo do celular não servir.
+// despertador "conversa + caminhada" vai direto pra caminhada.
 package com.implacavel.alarme
 
 import android.content.Context

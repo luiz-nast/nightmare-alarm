@@ -483,18 +483,13 @@ class CaminhadaTest {
     fun bipeDeParadoSoDepoisDoPrazoPraSair() {
         val prazo = 240_000L // 4 min depois do começo da etapa
         // No prazo, nada de bipe: a tela mostra quanto falta dele
-        assertNull(segundosProBipe(agora = 220_000, ultimoPasso = 0, prazoAte = prazo))
         assertEquals("You have 3:32 to start walking", avisoDoPrazo(agora = 28_000, prazoAte = prazo))
         assertEquals("You have 20 s to start walking", avisoDoPrazo(agora = 220_000, prazoAte = prazo))
         assertNull(avisoDoPrazo(agora = prazo, prazoAte = prazo))
         // Parado desde antes do fim do prazo: o 1º bipe 23 s depois dele
         assertEquals(prazo + 23_000, primeiroBipeParado(ultimoPasso = 100_000, prazoAte = prazo))
-        assertEquals(23, segundosProBipe(agora = prazo, ultimoPasso = 100_000, prazoAte = prazo))
-        assertEquals(1, segundosProBipe(agora = prazo + 22_500, ultimoPasso = 100_000, prazoAte = prazo))
-        assertEquals(0, segundosProBipe(agora = prazo + 30_000, ultimoPasso = 100_000, prazoAte = prazo)) // já bipando
         // Parou de andar depois do prazo: 23 s depois do último sinal de vida
         assertEquals(prazo + 28_000, primeiroBipeParado(ultimoPasso = prazo + 5_000, prazoAte = prazo))
-        assertEquals(20, segundosProBipe(agora = prazo + 8_000, ultimoPasso = prazo + 5_000, prazoAte = prazo))
         assertNull(paradoHa(agora = prazo - 1, ultimoPasso = 0, prazoAte = prazo))
         assertEquals(3_000L, paradoHa(agora = prazo + 8_000, ultimoPasso = prazo + 5_000, prazoAte = prazo))
         assertEquals(8_000L, paradoHa(agora = prazo + 8_000, ultimoPasso = 100_000, prazoAte = prazo))
