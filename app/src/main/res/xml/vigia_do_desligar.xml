@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A vigia do menu de desligar (VigiaDoDesligar.kt): só eventos de janela nova, e o conteúdo da janela pra achar os
-     textos "Power off" / "Restart". O app liga o serviço quando o alarme toca e desliga no fim; sem alarme tocando, ele
-     ignora tudo na primeira linha e se desliga sozinho. -->
+     textos "Power off" / "Restart". Sem alarme tocando, o serviço ignora tudo na primeira linha. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"

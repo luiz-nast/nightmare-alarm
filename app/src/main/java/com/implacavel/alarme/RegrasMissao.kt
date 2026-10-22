@@ -226,16 +226,6 @@ private val PACOTES_DO_SISTEMA = listOf("com.android.systemui", PACOTE_DO_MENU_D
 private val TEXTOS_DE_DESLIGAR = listOf("power off", "desligar")
 private val TEXTOS_DE_REINICIAR = listOf("restart", "reiniciar")
 
-/**
- * A lista dos serviços de acessibilidade ligados no celular ([atual], separados por ":", como o Android guarda), com a
- * vigia ([nosso], "pacote/classe"; [curto] é a mesma em "pacote/.Classe") ligada ou não. Os outros (o do Alarmy, por
- * exemplo) ficam como estão, na mesma ordem.
- */
-fun listaDeAcessibilidade(atual: String?, nosso: String, curto: String, ligada: Boolean): String {
-    val outros = atual.orEmpty().split(':').filter { it.isNotBlank() && it != nosso && it != curto }
-    return (if (ligada) outros + nosso else outros).joinToString(":")
-}
-
 /** Sites que a página do YouTube abre: o próprio YouTube e o Google (aviso de cookies e login). */
 private val SITES_DA_PAGINA = listOf("youtube.com", "youtu.be", "google.com", "google.com.br")
 
