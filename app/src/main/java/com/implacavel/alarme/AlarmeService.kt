@@ -180,6 +180,7 @@ class AlarmeService : Service() {
         private const val FALA_DE_PROCURAR = "procurar"
         private const val FALA_DA_MINI_TAREFA = "mini_tarefa"
         private const val FALA_DE_MAIS_TEMPO = "mais_tempo"
+        private const val FALA_DE_NAO_ENTENDER = "nao_entendi"
 
         private val _tocando = MutableStateFlow<Alarme?>(null)
 
@@ -391,6 +392,8 @@ class AlarmeService : Service() {
     private var andado = 0L // tempo andando na caminhada
     private var prazoAte = 0L // fim do prazo pra sair de casa (SystemClock.elapsedRealtime; 0 = ainda não começou)
     private var bipesParado = 0 // da vigia da caminhada, desde o último sinal de "andando"
+    private var naoEntendidos = 0 // falas seguidas da pessoa que a IA não entendeu (ruído, português)
+    private var ultimaFalaEntendida = "" // a última fala de verdade da IA: a que ela repete depois do bipe do não entendi
     private var preparoExtraUsado = false // a mini tarefa do prazo já deu o extra desta manhã
     private var miniTarefaRetirada = false // ele andou depois do primeiro bipe: a mini tarefa não aparece mais
     private val fraseDaMiniTarefa by lazy { fraseDaMiniTarefa(LocalDate.now()) }
@@ -548,6 +551,7 @@ class AlarmeService : Service() {
                 FALA_DE_PROCURAR to FALA_PROCURAR,
                 FALA_DA_MINI_TAREFA to falaDaMiniTarefa(fraseDaMiniTarefa),
                 FALA_DE_MAIS_TEMPO to FALA_MAIS_TEMPO,
+                FALA_DE_NAO_ENTENDER to FALA_NAO_ENTENDI,
             )
         } else {
             emptyMap()
@@ -1195,6 +1199,9 @@ class AlarmeService : Service() {
     private fun iaRespondeu(fala: String?) {
         if (fala != null) {
             falhas = 0
+            if (naoEntendeu(fala)) return naoEntendido()
+            naoEntendidos = 0
+            ultimaFalaEntendida = fala
             return falarDaIa(fala)
         }
         falhas++
@@ -1204,6 +1211,27 @@ class AlarmeService : Service() {
         }
         Log.w(TAG, "Conversa: a IA não respondeu ($falhas de $FALHAS_DA_IA_ATE_DESISTIR), pede de novo")
         ultimoPedido?.let { pedirAIa(it) }
+    }
+
+    /**
+     * A IA não entendeu o que a pessoa disse ([naoEntendeu]: ruído, português, o reconhecedor errou feio): sai a frase
+     * fixa [FALA_NAO_ENTENDI], e a fala dela some das anotações. Na [NAO_ENTENDIDOS_ATE_O_BIPE]ª seguida, um bipe leve
+     * pra médio ([BIPE_DO_NAO_ENTENDI]) pra acordar, e a IA repete a última fala que ela entendeu: a pergunta volta.
+     */
+    private fun naoEntendido() {
+        naoEntendidos++
+        if (transcricao.lastOrNull()?.daIa == false) transcricao.removeAt(transcricao.lastIndex)
+        if (naoEntendidos < NAO_ENTENDIDOS_ATE_O_BIPE) {
+            Log.i(TAG, "Conversa: a IA não entendeu ($naoEntendidos de $NAO_ENTENDIDOS_ATE_O_BIPE)")
+            return falarDaIa(FALA_NAO_ENTENDI)
+        }
+        Log.i(TAG, "Conversa: $naoEntendidos falas sem entender, bipe e a IA repete a última pergunta")
+        naoEntendidos = 0
+        val repete = ultimaFalaEntendida.ifEmpty { FALA_NAO_ENTENDI }
+        val rodada = rodadaConversa
+        val bipe = sirene.bipe(BIPE_DO_NAO_ENTENDI)
+        escuta?.surdoPor(bipe + ATRASO_DO_BIPE_MS)
+        handler.postDelayed({ if (rodada == rodadaConversa && _conversa.value != null) falarDaIa(repete) }, bipe + ATRASO_DO_BIPE_MS)
     }
 
     /**
@@ -1240,6 +1268,7 @@ class AlarmeService : Service() {
         }
         provisoria?.chegou = true
         if (texto == FALA_NAO_NEGOCIA) return pronta(voz?.fixa(FALA_DE_NAO_NEGOCIAR))
+        if (texto == FALA_NAO_ENTENDI) return pronta(voz?.fixa(FALA_DE_NAO_ENTENDER))
         val v = voz ?: return pronta(null)
         handler.postDelayed({
             if (!foi && rodada == rodadaConversa && esta == vezDaIa) {
@@ -1254,7 +1283,7 @@ class AlarmeService : Service() {
     private fun tocarFalaDaIa(texto: String, arquivo: File?) {
         val rodada = rodadaConversa
         provisoria = null
-        transcricao += Turno(daIa = true, texto = texto)
+        if (texto != FALA_NAO_ENTENDI) transcricao += Turno(daIa = true, texto = texto)
         _conversa.value = _conversa.value?.copy(falaDaIa = texto, suaVez = false, pensando = false, procurando = "")
         iaFalando = arquivo != null
         falarNaConversa(arquivo) {
@@ -1710,6 +1739,8 @@ class AlarmeService : Service() {
         andado = 0
         prazoAte = 0
         transcricao.clear()
+        naoEntendidos = 0
+        ultimaFalaEntendida = ""
         preparoExtraUsado = false
         miniTarefaRetirada = false
         _miniTarefa.value = null

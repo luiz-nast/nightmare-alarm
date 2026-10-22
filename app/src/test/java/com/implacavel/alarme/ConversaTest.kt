@@ -185,6 +185,24 @@ class ConversaTest {
     }
 
     @Test
+    fun aIaDizQueNaoEntendeuEmPoucasPalavras() {
+        for (fala in listOf(FALA_NAO_ENTENDI, "I didn't get that, sir.", "Sorry, I could not understand you.", "I didn't catch that. Say it again?", "I can't follow what you said, sir.")) {
+            assertTrue(fala, naoEntendeu(fala))
+        }
+        // Uma fala de verdade, mesmo com a expressão no meio, não conta
+        for (fala in listOf(
+            "Good morning, sir. What are your plans today?",
+            "I didn't get that joke at first, sir, but the Senate vote is serious: six days of work for one of rest. What do you think about it?",
+            "",
+        )) {
+            assertFalse(fala, naoEntendeu(fala))
+        }
+        assertEquals(3, NAO_ENTENDIDOS_ATE_O_BIPE)
+        assertTrue(volumeDoBipe(BIPE_DO_NAO_ENTENDI, 15) in 3..8) // leve pra médio, não o máximo
+        assertTrue(instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40)).contains("reply exactly \"$FALA_NAO_ENTENDI\""))
+    }
+
+    @Test
     fun anotacoesValemUmDiaSoDaUltimaConversa() {
         val escrita = 1_790_000_000_000L
         assertTrue(memoriaVale(escrita, escrita + 1_000))

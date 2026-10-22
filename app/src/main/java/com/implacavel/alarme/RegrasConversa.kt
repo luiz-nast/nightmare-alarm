@@ -278,6 +278,25 @@ fun querContinuar(texto: String): Boolean? {
     }
 }
 
+/**
+ * A IA disse que não entendeu ([FALA_NAO_ENTENDI], ou algo parecido, em poucas palavras): a pessoa fez ruído, falou
+ * português ou o reconhecedor errou feio. O serviço fala a frase fixa no lugar e conta ([NAO_ENTENDIDOS_ATE_O_BIPE]).
+ * Numa fala longa, um "I didn't get that joke" no meio não conta.
+ */
+fun naoEntendeu(texto: String): Boolean = NAO_ENTENDEU.containsMatchIn(semAcento(texto)) && quantasPalavras(texto) <= NAO_ENTENDEU_MAX_PALAVRAS
+
+private val NAO_ENTENDEU = Regex("(did not|didn't|don't|do not|could not|couldn't|can't|cannot) (get|catch|understand|follow|hear) (that|you|it|what)")
+private const val NAO_ENTENDEU_MAX_PALAVRAS = 14
+
+/**
+ * Tantas vezes seguidas sem entender: um bipe leve pra médio ([BIPE_DO_NAO_ENTENDI], o degrau no [volumeDoBipe]) pra
+ * acordar a pessoa, e a IA repete a última fala que ela entendeu (a pergunta volta uns segundos). Pedido do dono (10-22):
+ * respondendo em português ou só grunhindo, a IA seguia o processo julgando o que ele nem disse.
+ */
+const val NAO_ENTENDIDOS_ATE_O_BIPE = 3
+
+const val BIPE_DO_NAO_ENTENDI = 2
+
 /** O que a IA nunca pode dizer: mandar descansar, dormir, adiar, ou dizer que o alarme acabou. */
 private val FALA_PROIBIDA = Regex(
     "back to (sleep|bed)|go to sleep|(get|take|have) some (more )?(rest|sleep)|rest a (bit|little|while)|snooz|" +
@@ -462,6 +481,7 @@ fun instrucaoDoTreinador(noticias: List<String>, metas: String, hora: LocalTime,
     appendLine("- Prefer open questions (What, How, Why, Which) over yes or no questions.")
     appendLine("- Simple, everyday English: he is Brazilian and still sleepy. If he answers in Portuguese, keep speaking English.")
     appendLine("- His words come from speech recognition and may have mistakes: guess what he meant. When a line in parentheses says what the recognizer also heard, answer the version that makes sense, and never mention the recognizer. If his answer seems cut in the middle, ask him to go on.")
+    appendLine("- But if what he said makes no sense at all (noise, another language, gibberish), do not guess and do not move on: reply exactly \"$FALA_NAO_ENTENDI\" and nothing else.")
     appendLine("- Never suggest resting, sleeping, snoozing, staying in bed or \"five more minutes\". Never say that the alarm, the activity or the conversation is over, paused or shorter: you do not control them. If he asks for more sleep, to stop or to end the alarm, say \"Not my call, sir.\" and move on.")
     appendLine("- No medical advice.")
     appendLine("- The headlines below are in Portuguese: tell him what one is about in simple English, with your take. Do not invent details that are not in them. You do not need to cover all of them.")
