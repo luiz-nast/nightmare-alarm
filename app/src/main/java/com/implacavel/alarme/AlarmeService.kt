@@ -401,6 +401,8 @@ class AlarmeService : Service() {
     private var contador: ContadorDaCaminhada? = null // o relógio da caminhada, sobre os sentidos do serviço
     private var ouvinteDaMiniTarefa: Ouvinte? = null // o reconhecedor da mini tarefa do prazo, na vez da pessoa
     private var ultimoTextoDaNotificacao = "" // só manda a notificação de novo quando o texto muda
+    private var tiposPedidos = -1 // os tipos do serviço do último pedido ao Android ([atualizarTipos])
+    private var tiposDoServico = 0 // os que o Android deu
     private var naoEntendidos = 0 // falas seguidas da pessoa que a IA não entendeu (ruído, português)
     private var ultimaFalaEntendida = "" // a última fala de verdade da IA: a que ela repete depois do bipe do não entendi
     private var preparoExtraUsado = false // a mini tarefa do prazo já deu o extra desta manhã
@@ -559,8 +561,8 @@ class AlarmeService : Service() {
                 FALA_DE_SAIR to falaDeSair(prazoSair(alarme, tempos())),
                 FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA,
                 FALA_DE_PROCURAR to FALA_PROCURAR,
-                FALA_DA_MINI_TAREFA to falaDaMiniTarefa(fraseDaMiniTarefa),
-                FALA_DE_MAIS_TEMPO to FALA_MAIS_TEMPO,
+                FALA_DA_MINI_TAREFA to falaDaMiniTarefa(fraseDaMiniTarefa, preparoExtra(alarme)),
+                FALA_DE_MAIS_TEMPO to falaMaisTempo(preparoExtra(alarme)),
                 FALA_DE_NAO_ENTENDER to FALA_NAO_ENTENDI,
             )
         } else {
@@ -647,6 +649,7 @@ class AlarmeService : Service() {
         _caminhada.value = null
         _miniTarefa.value = null
         _tocando.value = null
+        VigiaDoDesligar.desligar(this)
         _comCaminhada.value = false
         if (processador.isHeld) processador.release()
         // Um instante pras últimas linhas chegarem no arquivo
@@ -676,6 +679,7 @@ class AlarmeService : Service() {
         if (!jaTocava) esquecerManha()
         _tocando.value = alarme
         _temposDoAlarme.value = em.tempos
+        VigiaDoDesligar.ligar(this) // só enquanto o alarme toca: o dia inteiro, os bancos estranham (veja VigiaDoDesligar.kt)
         mostrarNotificacao(alarme)
         sirene.preparar(em, comeco = !jaTocava)
         // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está.
@@ -913,11 +917,15 @@ class AlarmeService : Service() {
         ligarCamera()
     }
 
-    /** Abre a câmera do serviço, se a permissão está dada; sem ela, tenta de novo a cada segundo (a tela pede). */
+    /**
+     * Abre a câmera do serviço, se a permissão está dada; sem ela, tenta de novo a cada segundo (a tela pede). Dada no
+     * meio, o tipo "camera" do serviço vem primeiro ([atualizarTipos]); com a tela fechada e sem ele, espera a tela.
+     */
     private fun ligarCamera() {
         if (cameraDoServico != null || cumprido) return
         handler.removeCallbacks(relerCamera)
-        if (!Poder.CAMERA.liberado(this)) {
+        if (Poder.CAMERA.liberado(this)) atualizarTipos()
+        if (!Poder.CAMERA.liberado(this) || !telaAberta && !cameraComTelaFechada()) {
             handler.postDelayed(relerCamera, RELER_LOCALIZACAO_MS)
             return
         }
@@ -1265,7 +1273,12 @@ class AlarmeService : Service() {
         ultimoTique = SystemClock.elapsedRealtime()
         handler.removeCallbacks(tiqueDaConversa)
         handler.postDelayed(tiqueDaConversa, TIQUE_CONVERSA_MS)
-        if (primeira != null) return falarDaIa(primeira)
+        if (primeira != null) {
+            // No 3º "não entendi" seguido, é ela que volta (a pergunta de abertura), e não outro "não entendi"
+            ultimaFalaEntendida = primeira
+            naoEntendidos = 0
+            return falarDaIa(primeira)
+        }
         val ia = motor ?: return terminarConversa("sem a IA")
         pedirAIa { ia.retomar(it) }
     }
@@ -1640,6 +1653,9 @@ class AlarmeService : Service() {
      */
     private fun comecarCaminhada() {
         val alarme = _tocando.value ?: return
+        // Uma mini tarefa oferecida antes (o prazo recomeçou pelos botões do teste) não vale mais: o cartão e o ouvido saem
+        pararMiniTarefa()
+        _miniTarefa.value = null
         val agora = SystemClock.elapsedRealtime()
         if (prazoAte == 0L) prazoAte = agora + prazoSair(alarme, tempos())
         Log.i(TAG, "Caminhada: ${andado / 1000} s andados de ${metaCaminhada(alarme, tempos()) / 1000}, ${maxOf(0L, prazoAte - agora) / 1000} s de prazo pra sair")
@@ -1679,10 +1695,14 @@ class AlarmeService : Service() {
         return s
     }
 
-    /** Liberada nas Configurações no meio (ou tirada): os sentidos religam, ou a tela mostra o botão. */
+    /**
+     * Liberada nas Configurações no meio (ou tirada): os sentidos religam, ou a tela mostra o botão. Liberada, o tipo
+     * "location" do serviço vem junto ([atualizarTipos]), pro GPS seguir com a tela fechada.
+     */
     private val relerLocalizacao = object : Runnable {
         override fun run() {
             val s = sentidosDoServico ?: return
+            atualizarTipos()
             s.ligar(this@AlarmeService)
             handler.postDelayed(this, RELER_LOCALIZACAO_MS)
         }
@@ -2029,17 +2049,38 @@ class AlarmeService : Service() {
 
     /** Vira serviço em primeiro plano exibindo a notificação do alarme. */
     private fun mostrarNotificacao(alarme: Alarme) {
-        val comum = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        val comum = tipoComum()
         val tipo = tipoDoServico(comum)
         ultimoTextoDaNotificacao = textoDaNotificacao(alarme)
+        tiposPedidos = tipo
+        tiposDoServico = tipo
         runCatching { ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), tipo) }
             .onFailure {
                 // O Android não deixou os tipos de localização ou microfone (sem permissão, ou a tela não está na frente):
                 // segue só com o de sempre; a etapa então precisa da tela
                 Log.w(TAG, "Serviço: sem os tipos location e microphone (${it.javaClass.simpleName}: ${it.message?.take(100)})")
+                tiposDoServico = comum
                 ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), comum)
             }
     }
+
+    private fun tipoComum() = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+
+    /**
+     * Uma permissão dada no meio do alarme (os botões ALLOW LOCATION e ALLOW CAMERA): com a tela na frente, que é quando
+     * o Android deixa, os tipos do serviço vão de novo, agora com o dela. Sem isso, com a tela fechada o GPS para de
+     * chegar e a câmera é fechada. Só quando o pedido mudaria ([tiposPedidos]), pra não repetir um pedido recusado.
+     */
+    private fun atualizarTipos() {
+        val alarme = _tocando.value ?: return
+        if (!_silenciado.value || !telaAberta || cumprido || tipoDoServico(tipoComum()) == tiposPedidos) return
+        Log.i(TAG, "Serviço: permissão nova no meio do alarme, os tipos vão de novo")
+        mostrarNotificacao(alarme)
+    }
+
+    /** O serviço tem o tipo "camera" (ou não precisa: antes do Android 11): a câmera segue com a tela fechada. */
+    private fun cameraComTelaFechada() =
+        Build.VERSION.SDK_INT < 30 || tiposDoServico and ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA != 0
 
     /**
      * Os tipos do serviço em primeiro plano: o de sempre ([comum]) e, depois do STOP, os de localização (o GPS da
@@ -2100,6 +2141,8 @@ class AlarmeService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
+            // O texto muda a cada 5 s (atualizarNotificacao): sem isto, o aviso desceria por cima de tudo a cada vez
+            .setOnlyAlertOnce(true)
             .setColor(getColor(R.color.vermelho_alarme))
             .setColorized(true)
             .setContentIntent(telaCheia)

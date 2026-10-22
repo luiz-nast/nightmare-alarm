@@ -208,19 +208,33 @@ fun volumeDoBipe(n: Int, maximo: Int, degraus: Int = BIPES_ATE_ZERAR): Int =
     (maximo * n.coerceIn(1, degraus).toFloat() / degraus).roundToInt().coerceAtLeast(1)
 
 /**
- * A janela que apareceu é o menu de desligar do celular ([VigiaDoDesligar])? Pela classe (a do Android puro tem
- * "GlobalActions" no nome) ou pelos [textos] dela: "Power off" ou "Restart" (em inglês ou português), que só esse menu
- * tem juntos com o nome de pacote da interface do sistema. Sem o pacote do sistema, não é.
+ * A janela que apareceu é o menu de desligar do celular ([VigiaDoDesligar])? Pelo pacote do menu da Samsung, pela classe
+ * (a do Android puro tem "GlobalActions" no nome) ou pelos [textos] dela: "Power off" E "Restart" juntos (em inglês ou
+ * português), que só esse menu tem. Uma palavra só não basta: a barra de notificações tem "Restart to finish updating" ou
+ * "Toque para desligar", e fechá-la seria um susto à toa. Sem o pacote do sistema, não é.
  */
 fun ehMenuDeDesligar(pacote: String?, classe: String?, textos: List<String>): Boolean {
     if (pacote == null || !PACOTES_DO_SISTEMA.any { pacote == it || pacote.startsWith("$it.") }) return false
+    if (pacote.startsWith(PACOTE_DO_MENU_DA_SAMSUNG)) return true
     if (classe?.contains("GlobalActions", ignoreCase = true) == true) return true
     val tudo = textos.joinToString(" ").lowercase()
-    return TEXTOS_DO_MENU_DE_DESLIGAR.any { it in tudo }
+    return TEXTOS_DE_DESLIGAR.any { it in tudo } && TEXTOS_DE_REINICIAR.any { it in tudo }
 }
 
-private val PACOTES_DO_SISTEMA = listOf("com.android.systemui", "com.samsung.android.globalactions", "android")
-private val TEXTOS_DO_MENU_DE_DESLIGAR = listOf("power off", "desligar", "restart", "reiniciar")
+private const val PACOTE_DO_MENU_DA_SAMSUNG = "com.samsung.android.globalactions"
+private val PACOTES_DO_SISTEMA = listOf("com.android.systemui", PACOTE_DO_MENU_DA_SAMSUNG, "android")
+private val TEXTOS_DE_DESLIGAR = listOf("power off", "desligar")
+private val TEXTOS_DE_REINICIAR = listOf("restart", "reiniciar")
+
+/**
+ * A lista dos serviços de acessibilidade ligados no celular ([atual], separados por ":", como o Android guarda), com a
+ * vigia ([nosso], "pacote/classe"; [curto] é a mesma em "pacote/.Classe") ligada ou não. Os outros (o do Alarmy, por
+ * exemplo) ficam como estão, na mesma ordem.
+ */
+fun listaDeAcessibilidade(atual: String?, nosso: String, curto: String, ligada: Boolean): String {
+    val outros = atual.orEmpty().split(':').filter { it.isNotBlank() && it != nosso && it != curto }
+    return (if (ligada) outros + nosso else outros).joinToString(":")
+}
 
 /** Sites que a página do YouTube abre: o próprio YouTube e o Google (aviso de cookies e login). */
 private val SITES_DA_PAGINA = listOf("youtube.com", "youtu.be", "google.com", "google.com.br")

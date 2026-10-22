@@ -30,6 +30,11 @@
          no Android 12+, a precisa (FINE) tem que ser pedida junto com a aproximada (COARSE) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Pra ligar a vigia do menu de desligar só enquanto o alarme toca, e desligar no fim (VigiaDoDesligar.kt). Não vem
+         na instalação: o dono dá uma vez pelo cabo (adb shell pm grant ...). Sem ela, a vigia fica desligada -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Sem câmera ou microfone o app ainda instala; a missão cai pra um botão -->
     <uses-feature
@@ -103,8 +108,8 @@
                 android:value="Toca o alarme (som, vibração e tela cheia) até o usuário desligar" />
         </service>
 
-        <!-- A vigia do menu de desligar: serviço de acessibilidade (o dono liga nas Configurações), que fecha o menu de
-             desligar e reiniciar enquanto um alarme toca. Veja VigiaDoDesligar.kt -->
+        <!-- A vigia do menu de desligar: serviço de acessibilidade que o próprio app liga quando o alarme toca e
+             desliga no fim, e que fecha o menu de desligar e reiniciar nesse meio tempo. Veja VigiaDoDesligar.kt -->
         <service
             android:name=".VigiaDoDesligar"
             android:exported="true"
@@ -121,6 +126,12 @@
         <!-- Teste da IA do celular, sem som: só pelo cabo (o adb tem a permissão DUMP; app comum, não). Veja TesteDaIa.kt -->
         <receiver
             android:name=".TesteDaIa"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <!-- Teste da vigia do menu de desligar, sem som: só pelo cabo, como o TesteDaIa. Veja TesteDaVigia.kt -->
+        <receiver
+            android:name=".TesteDaVigia"
             android:exported="true"
             android:permission="android.permission.DUMP" />
 
