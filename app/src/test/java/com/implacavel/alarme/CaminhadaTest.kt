@@ -1,6 +1,7 @@
 package com.implacavel.alarme
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -444,6 +445,22 @@ class CaminhadaTest {
         assertEquals(111.19, distanciaM(a, a.copy(latitude = -23.549)), 0.05) // 0,001° de latitude
         // 0,001° de longitude encolhe com o cosseno da latitude (em São Paulo, 0,92)
         assertEquals(101.93, distanciaM(a, a.copy(longitude = -46.629)), 0.05)
+    }
+
+    @Test
+    fun miniTarefaDoPrazoUmaVezSoNoPrimeiroBipe() {
+        assertEquals(3 * 60_000L, preparoExtra(Alarme(1, 7, 0, caminhada = true)))
+        assertEquals(30_000L, preparoExtra(Alarme.teste(caminhada = true)))
+        // Só no 1º bipe de parado depois do prazo, se o extra não foi usado e ela não foi retirada
+        assertTrue(ofereceMiniTarefa(bipe = 1, usado = false, retirada = false))
+        assertFalse(ofereceMiniTarefa(bipe = 2, usado = false, retirada = false))
+        assertFalse(ofereceMiniTarefa(bipe = 1, usado = true, retirada = false))
+        assertFalse(ofereceMiniTarefa(bipe = 1, usado = false, retirada = true)) // andou depois do 1º bipe: já acordou
+        // A frase do dia: sempre a mesma no dia, e não é uma das 5 da verificação da câmera
+        val dia = java.time.LocalDate.of(2026, 10, 22)
+        assertEquals(fraseDaMiniTarefa(dia), fraseDaMiniTarefa(dia))
+        assertTrue(fraseDaMiniTarefa(dia) in FRASES_MOTIVACIONAIS)
+        assertFalse(fraseDaMiniTarefa(dia) in frasesDoDia(dia, 10))
     }
 
     @Test

@@ -136,7 +136,8 @@ private fun TelaAlarme(alarme: Alarme) {
     val metadeVerificada by AlarmeService.metadeVerificada.collectAsStateWithLifecycle()
     // Os tempos da foto do alarme, não os ajustes de agora: mexer nos ajustes com o alarme tocando não encurta a missão
     val tempos by AlarmeService.temposDoAlarme.collectAsStateWithLifecycle()
-    val ondasMudas by Ajustes.ondasMudasAgora.collectAsStateWithLifecycle()
+    val ondasMudas by AlarmeService.ondasMudas.collectAsStateWithLifecycle()
+    val miniTarefa by AlarmeService.miniTarefa.collectAsStateWithLifecycle()
     val metaCamera = metaOlhar(alarme, tempos)
     val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
     val comCaminhada by AlarmeService.comCaminhada.collectAsStateWithLifecycle()
@@ -227,6 +228,8 @@ private fun TelaAlarme(alarme: Alarme) {
                         onConcluiu = { AlarmeService.missaoCumprida(ctx) },
                         ondasMudas = ondasMudas,
                         onOndas = { AlarmeService.ondas(ctx, ligadas = it) },
+                        miniTarefa = miniTarefa,
+                        onMiniTarefaFeita = { AlarmeService.miniTarefaFeita(ctx) },
                     )
                 }
             }

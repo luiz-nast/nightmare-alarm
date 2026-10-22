@@ -34,6 +34,28 @@ const val CAMINHADA_TESTE_MS = 3 * 60_000L
 const val PRAZO_SAIR_TESTE_MS = 30_000L
 
 /**
+ * A mini tarefa do prazo: o dono dorme tão pesado que os 4 min passam sem ele sentir (10-22). No primeiro bipe de
+ * parado depois do prazo ([PARADO_MS]), a tela oferece uma vez só uma frase pra repetir ([fraseDaMiniTarefa]);
+ * repetida, o prazo ganha mais isto (com as ondas de novo). Se ele andou depois desse bipe, a oferta some e não
+ * volta: ele já acordou. No teste, [PREPARO_EXTRA_TESTE_MS].
+ */
+const val PREPARO_EXTRA_MS = 3 * 60_000L
+
+const val PREPARO_EXTRA_TESTE_MS = 30_000L
+
+/** Quanto prazo a mini tarefa do [alarme] dá. */
+fun preparoExtra(alarme: Alarme): Long = if (alarme.deTeste) PREPARO_EXTRA_TESTE_MS else PREPARO_EXTRA_MS
+
+/** A frase da mini tarefa do [dia]: uma das motivacionais, diferente das da verificação da câmera (que são as primeiras do sorteio do dia). */
+fun fraseDaMiniTarefa(dia: java.time.LocalDate): String = frasesDoDia(dia, FRASES_MOTIVACIONAIS.size).last()
+
+/**
+ * A mini tarefa aparece agora? Só no primeiro bipe de parado ([bipe] 1) depois do prazo, uma vez por manhã: nem se o
+ * prazo extra já foi [usado], nem se ela foi [retirada] (ele andou depois do primeiro bipe).
+ */
+fun ofereceMiniTarefa(bipe: Int, usado: Boolean, retirada: Boolean): Boolean = bipe == 1 && !usado && !retirada
+
+/**
  * Depois do prazo pra sair, parado (sem sinal de vida: nem passo, nem velocidade no GPS, [Avaliacao.valeProBipe]) por
  * esse tempo: um bipe fraco ([primeiroBipeParado]); depois, um a cada [ENTRE_BIPES_PARADO_MS], um degrau de volume
  * mais alto, até o máximo no bipe [BIPES_PARADO_ATE_O_MAXIMO] (aos [PARADO_MAXIMO_MS]: 41 s), com o som forte, até

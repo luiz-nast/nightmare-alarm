@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
@@ -61,8 +62,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -255,7 +259,8 @@ fun rememberSentidosDaCaminhada(ligado: Boolean): SentidosDaCaminhada {
  * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. [onDefeito] só num
  * celular sem GPS nenhum, pra um defeito não prender ninguém (como a câmera que não abre).
  * [onConcluiu] uma vez, com o anel completo. Com [detalhar] (o TesteDoGps), sem prazo nem bipe. No prazo, o botão
- * das ondas ([ondasMudas], [onOndas]): quem não quer ouvir o mar emudece, e fica assim nas próximas manhãs.
+ * das ondas ([ondasMudas], [onOndas]): quem não quer ouvir o mar emudece nesta manhã. Depois do prazo, no primeiro
+ * bipe de parado, a [miniTarefa] do serviço: a frase pra repetir e ganhar mais prazo ([onMiniTarefaFeita]).
  */
 @Composable
 fun EtapaCaminhada(
@@ -270,6 +275,8 @@ fun EtapaCaminhada(
     detalhar: Boolean = false,
     ondasMudas: Boolean = false,
     onOndas: ((ligadas: Boolean) -> Unit)? = null,
+    miniTarefa: MiniTarefa? = null,
+    onMiniTarefaFeita: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
@@ -355,6 +362,10 @@ fun EtapaCaminhada(
         } else {
             BarraDoBipe(paradoMs)
         }
+        if (miniTarefa != null && onMiniTarefaFeita != null) {
+            Spacer(Modifier.height(12.dp))
+            MiniTarefaDoPrazo(miniTarefa, onMiniTarefaFeita)
+        }
         if (!sentidos.permitida) {
             Spacer(Modifier.height(12.dp))
             PedirLocalizacao()
@@ -371,6 +382,53 @@ fun EtapaCaminhada(
 }
 
 private val TRILHA_TAMANHO = 180.dp
+
+/**
+ * A mini tarefa do prazo pra sair ([MiniTarefa]): a frase que a voz ofereceu e, na vez da pessoa ([MiniTarefa.suaVez],
+ * depois de a voz terminar), a escuta em inglês até ela repetir ([repetiu]), pintando de verde as palavras já ditas
+ * ([palavrasDitas]), como na verificação da câmera. Repetida, [onFeita]: o serviço dá o prazo extra.
+ */
+@Composable
+private fun MiniTarefaDoPrazo(tarefa: MiniTarefa, onFeita: () -> Unit) {
+    val ctx = LocalContext.current
+    val feita by rememberUpdatedState(onFeita)
+    var ouvido by remember(tarefa.frase) { mutableStateOf("") }
+    if (tarefa.suaVez) {
+        DisposableEffect(tarefa.frase) {
+            val ouvinte = Ouvinte(
+                ctx, "mini tarefa", aceita = { repetiu(tarefa.frase, it) },
+                onOuviu = { ouvido = it },
+                onAceito = { feita() },
+                onIndisponivel = {},
+                idioma = "en-US",
+                juntar = true,
+            )
+            ouvinte.comecar()
+            onDispose { ouvinte.parar() }
+        }
+    }
+    Column(
+        Modifier.fillMaxWidth(0.92f).background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(20.dp)).padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Fell asleep? Repeat this and you get more time:", color = AzulCaminhada, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(6.dp))
+        val frase = buildAnnotatedString {
+            append("“")
+            palavrasDitas(tarefa.frase, ouvido).forEachIndexed { i, (palavra, dita) ->
+                if (i > 0) append(" ")
+                if (dita) withStyle(SpanStyle(color = VerdeAndando)) { append(palavra) } else append(palavra)
+            }
+            append("”")
+        }
+        Text(frase, color = AzulCaminhada, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text(
+            if (tarefa.suaVez && ouvido.isNotBlank()) "Heard: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
+            color = AzulCaminhada.copy(alpha = 0.7f), fontSize = 14.sp, textAlign = TextAlign.Center, minLines = 1, maxLines = 2,
+        )
+        Text(if (tarefa.suaVez) "🎤 Your turn" else "Listen…", color = if (tarefa.suaVez) VerdeAndando else AzulCaminhada.copy(alpha = 0.7f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    }
+}
 
 /**
  * A barra do bipe, depois do prazo pra sair: o tempo parado ([paradoMs], sem sinal de vida) enche a barra de 0 a

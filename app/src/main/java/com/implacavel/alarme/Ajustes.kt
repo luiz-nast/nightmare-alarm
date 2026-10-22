@@ -15,8 +15,8 @@ const val VOLUME_DA_VOZ_MIN = 0.10f
 const val SOBRE_MIM_MAX_LETRAS = 600
 
 /**
- * Ajustes e estado que precisam sobreviver ao processo: o volume da voz, os tempos dos despertadores ([Tempos]), as
- * ondas mudas, o que o dono contou de si e o que a IA anotou dele na última conversa ([memoriaDaIa]), e o alarme em andamento (e onde a
+ * Ajustes e estado que precisam sobreviver ao processo: o volume da voz, os tempos dos despertadores ([Tempos]), o
+ * que o dono contou de si e o que a IA anotou dele na última conversa ([memoriaDaIa]), e o alarme em andamento (e onde a
  * missão dele está). Gravado em [prefsProtegidas], como os alarmes. Os sons ficam em [Sons] (a música única de antes,
  * "musicaUri", é migrada pra lá).
  */
@@ -93,17 +93,6 @@ object Ajustes {
         _tempos.value = t
     }
 
-    private val _ondasMudas = MutableStateFlow(false)
-
-    /** O som de ondas do prazo pra sair fica mudo (o botão na tela da caminhada): vale até o dono ligar de novo. */
-    val ondasMudasAgora: StateFlow<Boolean> = _ondasMudas.asStateFlow()
-    val ondasMudas: Boolean get() = _ondasMudas.value
-
-    fun emudecerOndas(mudas: Boolean) {
-        prefs.edit { putBoolean("ondasMudas", mudas) }
-        _ondasMudas.value = mudas
-    }
-
     private val _sobreMim = MutableStateFlow("")
 
     /** O que o dono contou de si pra IA da manhã (Settings › "About you"): quem é, o que quer, do que gosta. Vai inteiro na instrução dela. */
@@ -158,7 +147,6 @@ object Ajustes {
             prepararMin = prefs.getInt("prepararMin", p.prepararMin),
             caminhadaMin = prefs.getInt("caminhadaMin", p.caminhadaMin),
         ).ajustado()
-        _ondasMudas.value = prefs.getBoolean("ondasMudas", false)
         _sobreMim.value = prefs.getString("sobreMim", "").orEmpty().take(SOBRE_MIM_MAX_LETRAS)
         _memoriaDaIa.value = limparAnotacoes(prefs.getString("memoriaDaIa", "").orEmpty())
         _memoriaEm.value = prefs.getLong("memoriaEm", 0L)

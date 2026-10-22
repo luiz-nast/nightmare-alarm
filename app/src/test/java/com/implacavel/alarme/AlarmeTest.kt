@@ -247,9 +247,13 @@ class AlarmeTest {
     fun progressoSobreviveAoAppMorrer() {
         val p = Progresso(
             desde = 1_000, olhadoMs = 600_000, metadeVerificada = true, caminho = "CONVERSA_E_CAMINHADA", etapa = "CAMINHADA",
-            conversadoMs = 300_000, extras = 1, andadoMs = 95_000, prazoRestanteMs = 12_000,
+            conversadoMs = 300_000, extras = 1, andadoMs = 95_000, prazoRestanteMs = 12_000, preparoExtraUsado = true, miniTarefaRetirada = true,
         )
         assertEquals(p, Progresso.deJson(JSONObject(p.paraJson().toString())))
+        // Gravação de antes da mini tarefa: ela ainda não foi usada nem retirada
+        val antiga = Progresso.deJson(JSONObject(p.paraJson().apply { remove("preparoExtraUsado"); remove("miniTarefaRetirada") }.toString()))
+        assertFalse(antiga.preparoExtraUsado)
+        assertFalse(antiga.miniTarefaRetirada)
         // Do alarme de sempre, antes de a manhã decidir: sem caminho, etapa nem prazo
         val simples = Progresso(desde = 2_000, olhadoMs = 30_000)
         assertEquals(simples, Progresso.deJson(JSONObject(simples.paraJson().toString())))

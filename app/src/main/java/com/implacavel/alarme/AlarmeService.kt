@@ -81,6 +81,12 @@ data class Conversa(
 /** A caminhada da manhã: o tempo já [andadoMs] (guardado pelo serviço), a meta e o fim do prazo pra sair de casa ([prazoAte], SystemClock.elapsedRealtime). */
 data class Caminhada(val andadoMs: Long, val metaMs: Long, val prazoAte: Long)
 
+/**
+ * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a [frase] pra repetir e ganhar mais prazo, e se já é a
+ * [suaVez] de repetir (depois de a voz terminar de oferecer: antes, o reconhecedor ouviria a própria voz dizendo a frase).
+ */
+data class MiniTarefa(val frase: String, val suaVez: Boolean)
+
 /** As etapas do despertador "conversa + caminhada", depois do STOP e do bom dia. */
 private enum class EtapaDaManha { CONVERSA, CAMINHADA }
 
@@ -104,6 +110,7 @@ class AlarmeService : Service() {
         private const val ACAO_SEM_VOZ = "sem_voz"
         private const val ACAO_ANDANDO = "andando"
         private const val ACAO_ONDAS = "ondas"
+        private const val ACAO_MINI_TAREFA = "mini_tarefa"
         private const val ACAO_FASE = "fase"
         private const val ACAO_CANCELAR_TESTE = "cancelar_teste"
         private const val EXTRA_VOLUME = "volume"
@@ -171,6 +178,8 @@ class AlarmeService : Service() {
         private const val FALA_DE_SAIR = "sair"
         private const val FALA_DE_NAO_NEGOCIAR = "nao_negocia"
         private const val FALA_DE_PROCURAR = "procurar"
+        private const val FALA_DA_MINI_TAREFA = "mini_tarefa"
+        private const val FALA_DE_MAIS_TEMPO = "mais_tempo"
 
         private val _tocando = MutableStateFlow<Alarme?>(null)
 
@@ -249,6 +258,16 @@ class AlarmeService : Service() {
         /** Na caminhada: quando (SystemClock.elapsedRealtime) chegou o último sinal de "andando", ou a etapa começou. A vigia e a contagem pro bipe contam daqui. */
         val ultimoPasso: StateFlow<Long> = _ultimoPasso.asStateFlow()
 
+        private val _ondasMudas = MutableStateFlow(false)
+
+        /** As ondas do prazo pra sair estão mudas (o botão na tela da caminhada). Toda manhã começa ligada: o dono desliga se quiser. */
+        val ondasMudas: StateFlow<Boolean> = _ondasMudas.asStateFlow()
+
+        private val _miniTarefa = MutableStateFlow<MiniTarefa?>(null)
+
+        /** A mini tarefa do prazo pra sair oferecida agora (null = nenhuma): a tela mostra a frase e, na vez da pessoa, escuta. */
+        val miniTarefa: StateFlow<MiniTarefa?> = _miniTarefa.asStateFlow()
+
         private val _temposDoAlarme = MutableStateFlow(TEMPOS_PADRAO)
 
         /**
@@ -309,8 +328,11 @@ class AlarmeService : Service() {
          */
         fun andando(ctx: Context, andadoMs: Long) { ctx.startService(comando(ctx, ACAO_ANDANDO).putExtra(EXTRA_ANDADO, andadoMs)) }
 
-        /** O botão das ondas na tela da caminhada: [ligadas] ou mudas, agora e nas próximas manhãs ([Ajustes.ondasMudas]). */
+        /** O botão das ondas na tela da caminhada: [ligadas] ou mudas, nesta manhã. */
         fun ondas(ctx: Context, ligadas: Boolean) { ctx.startService(comando(ctx, ACAO_ONDAS).putExtra(EXTRA_LIGADAS, ligadas)) }
+
+        /** A pessoa repetiu a frase da mini tarefa: mais prazo pra sair ([preparoExtra]). */
+        fun miniTarefaFeita(ctx: Context) { ctx.startService(comando(ctx, ACAO_MINI_TAREFA)) }
 
         /** Os botões "Back" e "Forward" de um alarme de teste: a manhã pula pra [fase] ([FaseDoTeste]). Num alarme de verdade, nada. */
         fun irPraFase(ctx: Context, fase: FaseDoTeste) { ctx.startService(comando(ctx, ACAO_FASE).putExtra(EXTRA_FASE, fase.name)) }
@@ -369,6 +391,9 @@ class AlarmeService : Service() {
     private var andado = 0L // tempo andando na caminhada
     private var prazoAte = 0L // fim do prazo pra sair de casa (SystemClock.elapsedRealtime; 0 = ainda não começou)
     private var bipesParado = 0 // da vigia da caminhada, desde o último sinal de "andando"
+    private var preparoExtraUsado = false // a mini tarefa do prazo já deu o extra desta manhã
+    private var miniTarefaRetirada = false // ele andou depois do primeiro bipe: a mini tarefa não aparece mais
+    private val fraseDaMiniTarefa by lazy { fraseDaMiniTarefa(LocalDate.now()) }
     private val transcricao = mutableListOf<Turno>() // a conversa de hoje, pras anotações da IA no fim ([MotorDaConversa.anotar])
 
     /** Os tempos deste alarme ([Tempos]): a foto dos ajustes de quando ele tocou ([EmAndamento.tempos]), lida em [onCreate] e [iniciar]. */
@@ -413,6 +438,8 @@ class AlarmeService : Service() {
             extras = extras,
             andadoMs = andado,
             prazoRestanteMs = if (prazoAte == 0L) null else (prazoAte - SystemClock.elapsedRealtime()).coerceAtLeast(0),
+            preparoExtraUsado = preparoExtraUsado,
+            miniTarefaRetirada = miniTarefaRetirada,
         )
         if (p != progressoGravado) {
             Ajustes.progresso = p
@@ -434,6 +461,8 @@ class AlarmeService : Service() {
         extras = p.extras
         andado = p.andadoMs
         prazoAte = p.prazoRestanteMs?.let { SystemClock.elapsedRealtime() + it } ?: 0L
+        preparoExtraUsado = p.preparoExtraUsado
+        miniTarefaRetirada = p.miniTarefaRetirada
         progressoGravado = p
     }
 
@@ -517,6 +546,8 @@ class AlarmeService : Service() {
                 FALA_DE_SAIR to falaDeSair(prazoSair(alarme, tempos())),
                 FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA,
                 FALA_DE_PROCURAR to FALA_PROCURAR,
+                FALA_DA_MINI_TAREFA to falaDaMiniTarefa(fraseDaMiniTarefa),
+                FALA_DE_MAIS_TEMPO to FALA_MAIS_TEMPO,
             )
         } else {
             emptyMap()
@@ -576,6 +607,7 @@ class AlarmeService : Service() {
             }
             acao == ACAO_ANDANDO -> andou(intent.getLongExtra(EXTRA_ANDADO, 0L))
             acao == ACAO_ONDAS -> ondas(intent.getBooleanExtra(EXTRA_LIGADAS, true))
+            acao == ACAO_MINI_TAREFA -> miniTarefaFeita()
             // Os botões de fase e de cancelar só existem na tela de um alarme de teste; um comando atrasado não mexe num alarme de verdade
             acao == ACAO_FASE -> if (alarme.deTeste) intent.getStringExtra(EXTRA_FASE)?.let { nome -> FaseDoTeste.entries.firstOrNull { it.name == nome } }?.let(::irPraFase)
             acao == ACAO_CANCELAR_TESTE -> if (alarme.deTeste && !cumprido) {
@@ -608,6 +640,7 @@ class AlarmeService : Service() {
         _olhado.value = 0
         _conversa.value = null
         _caminhada.value = null
+        _miniTarefa.value = null
         _tocando.value = null
         _comCaminhada.value = false
         if (processador.isHeld) processador.release()
@@ -666,6 +699,7 @@ class AlarmeService : Service() {
         _metadeVerificada.value = false
         _conversa.value = null
         _caminhada.value = null
+        _miniTarefa.value = null
         // O anel e a verificação do progresso retomado (os de cima zeraram a tela, não o progresso)
         if (salvo?.desde == em.desde) {
             _olhado.value = salvo.olhadoMs
@@ -1442,24 +1476,56 @@ class AlarmeService : Service() {
         Log.i(TAG, "Caminhada: ${andado / 1000} s andados de ${metaCaminhada(alarme, tempos()) / 1000}, ${maxOf(0L, prazoAte - agora) / 1000} s de prazo pra sair")
         _caminhada.value = Caminhada(andadoMs = andado, metaMs = metaCaminhada(alarme, tempos()), prazoAte = prazoAte)
         // No prazo pra se vestir e sair, o som de ondas (se o dono não emudeceu); ele mesmo deixa o alto-falante ligado
+        ondasNoPrazo()
+        sirene.manterAcordado(false)
+        adiarVigiaDaCaminhada()
+    }
+
+    /** As ondas enquanto durar o prazo pra sair (ligadas, se o dono não emudeceu nesta manhã) e o fim delas marcado no relógio. */
+    private fun ondasNoPrazo() {
+        val agora = SystemClock.elapsedRealtime()
         handler.removeCallbacks(fimDasOndas)
         if (agora < prazoAte) {
-            sirene.ondas(!Ajustes.ondasMudas)
+            sirene.ondas(!_ondasMudas.value)
             handler.postDelayed(fimDasOndas, prazoAte - agora)
         } else {
             sirene.ondas(false)
         }
-        sirene.manterAcordado(false)
-        adiarVigiaDaCaminhada()
     }
 
     /** Fim do prazo pra sair: as ondas param (daí em diante, parado, só os bipes). */
     private val fimDasOndas = Runnable { sirene.ondas(false) }
 
-    /** O botão das ondas na tela da caminhada: mudas ou [ligadas], agora (ainda no prazo pra sair) e nas próximas manhãs. */
+    /** O botão das ondas na tela da caminhada: mudas ou [ligadas], nesta manhã (a próxima começa ligada de novo). */
     private fun ondas(ligadas: Boolean) {
-        Ajustes.emudecerOndas(!ligadas)
+        _ondasMudas.value = !ligadas
         if (_caminhada.value != null && SystemClock.elapsedRealtime() < prazoAte) sirene.ondas(ligadas)
+    }
+
+    /**
+     * A mini tarefa do prazo pra sair, no primeiro bipe de parado depois dele ([ofereceMiniTarefa]): a voz oferece a
+     * frase e, quando termina, é a vez dela de repetir (a tela escuta). Os bipes seguem enquanto isso.
+     */
+    private fun oferecerMiniTarefa() {
+        Log.i(TAG, "Caminhada: mini tarefa oferecida (mais prazo se repetir a frase)")
+        _miniTarefa.value = MiniTarefa(fraseDaMiniTarefa, suaVez = false)
+        sirene.falar(voz?.fixa(FALA_DA_MINI_TAREFA)) {
+            _miniTarefa.value = _miniTarefa.value?.copy(suaVez = true)
+        }
+    }
+
+    /** A pessoa repetiu a frase da mini tarefa: o prazo pra sair ganha o extra, com as ondas, e os bipes param. Uma vez por manhã. */
+    private fun miniTarefaFeita() {
+        val alarme = _tocando.value ?: return
+        if (_miniTarefa.value?.suaVez != true || _caminhada.value == null || preparoExtraUsado || cumprido) return
+        Log.i(TAG, "Caminhada: mini tarefa feita, mais ${preparoExtra(alarme) / 1000} s de prazo pra sair")
+        preparoExtraUsado = true
+        _miniTarefa.value = null
+        prazoAte = SystemClock.elapsedRealtime() + preparoExtra(alarme)
+        _caminhada.value = _caminhada.value?.copy(prazoAte = prazoAte)
+        ondasNoPrazo()
+        adiarVigiaDaCaminhada()
+        sirene.acerto { sirene.falar(voz?.fixa(FALA_DE_MAIS_TEMPO)) }
     }
 
     /**
@@ -1528,6 +1594,7 @@ class AlarmeService : Service() {
         handler.removeCallbacks(vigiaDaCaminhada)
         sirene.ondas(false)
         _caminhada.value = null
+        _miniTarefa.value = null
         prazoAte = 0L
         conversadoMs = 0
         extras = 0
@@ -1561,6 +1628,12 @@ class AlarmeService : Service() {
         if (_caminhada.value == null || !_silenciado.value || _saudando.value || cumprido) return
         andado = maxOf(andado, andadoMs)
         _caminhada.value = _caminhada.value?.copy(andadoMs = andado) // a tela recriada no meio continua daqui
+        // Andou depois do primeiro bipe: já acordou, a mini tarefa some e não volta
+        if (_miniTarefa.value != null) {
+            Log.i(TAG, "Caminhada: andou, a mini tarefa some")
+            _miniTarefa.value = null
+            miniTarefaRetirada = true
+        }
         adiarVigiaDaCaminhada()
     }
 
@@ -1584,6 +1657,7 @@ class AlarmeService : Service() {
             Log.i(TAG, "Caminhada: parado depois do prazo pra sair, bipe $bipesParado")
             sirene.bipe(bipesParado, BIPES_PARADO_ATE_O_MAXIMO)
             handler.postDelayed(this, ENTRE_BIPES_PARADO_MS)
+            if (ofereceMiniTarefa(bipesParado, preparoExtraUsado, miniTarefaRetirada)) oferecerMiniTarefa()
         }
     }
 
@@ -1603,6 +1677,7 @@ class AlarmeService : Service() {
         saudacaoTerminou = false
         _conversa.value = null
         _caminhada.value = null
+        _miniTarefa.value = null
         if (caminho == null) {
             // Ainda decidindo: no próximo STOP, tudo de novo
             motor?.desligar()
@@ -1635,6 +1710,10 @@ class AlarmeService : Service() {
         andado = 0
         prazoAte = 0
         transcricao.clear()
+        preparoExtraUsado = false
+        miniTarefaRetirada = false
+        _miniTarefa.value = null
+        _ondasMudas.value = false
     }
 
     /**

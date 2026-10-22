@@ -60,6 +60,12 @@ fun falaDeSair(prazoMs: Long): String {
 /** No lugar de uma fala da IA que manda descansar ou diz que o alarme acabou (respostaSegura). */
 const val FALA_NAO_NEGOCIA = "Not my call, sir. What is the first thing you will do today?"
 
+/** A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a voz oferece a [frase] no primeiro bipe de parado. */
+fun falaDaMiniTarefa(frase: String): String = "Fell asleep, sir? Repeat this sentence and you get three more minutes: $frase"
+
+/** A mini tarefa feita: o prazo extra começa. */
+const val FALA_MAIS_TEMPO = "Three more minutes, sir. Get dressed and go outside."
+
 /** Enquanto a IA procura na internet o que a pessoa perguntou (a busca leva uns segundos): a voz avisa. */
 const val FALA_PROCURAR = "Good question, sir. Let me check that."
 

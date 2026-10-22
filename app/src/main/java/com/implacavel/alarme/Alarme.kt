@@ -213,9 +213,10 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
 /**
  * Onde a missão do alarme em andamento estava ([desde] diz de qual alarme): o anel da câmera ([olhadoMs]) e se a
  * verificação do meio já foi feita; no "conversa + caminhada", o caminho e a etapa da manhã (pelo nome), o tempo de
- * conversa pura e os extras, o tempo andado e quanto faltava do prazo pra sair ([prazoRestanteMs]; null = ainda não
- * começou). O serviço grava a cada poucos segundos ([Ajustes.progresso]): se o app morrer ou o celular desligar, o
- * alarme volta tocando e, depois do STOP, continua daqui.
+ * conversa pura e os extras, o tempo andado, quanto faltava do prazo pra sair ([prazoRestanteMs]; null = ainda não
+ * começou) e a mini tarefa do prazo (se o extra já foi [preparoExtraUsado] ou se ela foi [miniTarefaRetirada]). O
+ * serviço grava a cada poucos segundos ([Ajustes.progresso]): se o app morrer ou o celular desligar, o alarme volta
+ * tocando e, depois do STOP, continua daqui.
  */
 data class Progresso(
     val desde: Long,
@@ -227,6 +228,8 @@ data class Progresso(
     val extras: Int = 0,
     val andadoMs: Long = 0,
     val prazoRestanteMs: Long? = null,
+    val preparoExtraUsado: Boolean = false,
+    val miniTarefaRetirada: Boolean = false,
 ) {
     fun paraJson(): JSONObject = JSONObject()
         .put("desde", desde)
@@ -235,6 +238,8 @@ data class Progresso(
         .put("conversadoMs", conversadoMs)
         .put("extras", extras)
         .put("andadoMs", andadoMs)
+        .put("preparoExtraUsado", preparoExtraUsado)
+        .put("miniTarefaRetirada", miniTarefaRetirada)
         .apply {
             caminho?.let { put("caminho", it) }
             etapa?.let { put("etapa", it) }
@@ -252,6 +257,8 @@ data class Progresso(
             extras = o.optInt("extras"),
             andadoMs = o.optLong("andadoMs"),
             prazoRestanteMs = if (o.has("prazoRestanteMs")) o.getLong("prazoRestanteMs") else null,
+            preparoExtraUsado = o.optBoolean("preparoExtraUsado"),
+            miniTarefaRetirada = o.optBoolean("miniTarefaRetirada"),
         )
     }
 }
