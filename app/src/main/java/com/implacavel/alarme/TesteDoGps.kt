@@ -34,6 +34,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -120,7 +125,21 @@ class TesteDoGps : ComponentActivity() {
         Log.i(TAG, "Teste GPS: começou, $minutos min")
         setContent {
             TemaImplacavel {
-                val sentidos = rememberSentidosDaCaminhada(ligado = true)
+                val sentidos = rememberSentidosDaCaminhada()
+                // O relógio da caminhada, como no serviço, só que sem alarme: soma e conclui no log
+                var andadoMs by remember { mutableLongStateOf(0L) }
+                var conferindoMs by remember { mutableLongStateOf(0L) }
+                DisposableEffect(sentidos) {
+                    val contador = ContadorDaCaminhada(
+                        this@TesteDoGps, sentidos, 0L,
+                        metaMs = { minutos * 60_000L },
+                        aoSomar = { a, c -> andadoMs = a; conferindoMs = c },
+                        aoViver = {},
+                        aoConcluir = { Log.i(TAG, "Teste GPS: meta de $minutos min andados") },
+                        aoDefeito = { Log.w(TAG, "Teste GPS: o celular não tem GPS") },
+                    ).also { it.ligar() }
+                    onDispose { contador.desligar() }
+                }
                 Column(
                     Modifier.fillMaxSize().background(Color(0xFFFDECEA)).verticalScroll(rememberScrollState()).padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -128,13 +147,11 @@ class TesteDoGps : ComponentActivity() {
                 ) {
                     EtapaCaminhada(
                         sentidos = sentidos,
-                        andadoInicialMs = 0,
+                        andadoMs = andadoMs,
+                        conferindoMs = conferindoMs,
                         metaMs = minutos * 60_000L,
                         prazoAte = 0,
                         ultimoPasso = 0,
-                        onAndando = {},
-                        onDefeito = { Log.w(TAG, "Teste GPS: o celular não tem GPS") },
-                        onConcluiu = {},
                         detalhar = true,
                     )
                 }

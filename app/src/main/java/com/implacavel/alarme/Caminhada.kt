@@ -173,156 +173,216 @@ class SentidosDaCaminhada {
     private fun repintarConferindo(como: Trecho) {
         for (i in trilha.indices) if (trilha[i].trecho == Trecho.CONFERINDO) trilha[i] = trilha[i].copy(trecho = como)
     }
-}
 
-/**
- * Os [SentidosDaCaminhada] da tela, ligados enquanto [ligado] (uma manhã com caminhada, depois do STOP) e com a
- * permissão da localização. Sem GPS no celular, [SentidosDaCaminhada.semGps].
- */
-@Composable
-fun rememberSentidosDaCaminhada(ligado: Boolean): SentidosDaCaminhada {
-    val ctx = LocalContext.current
-    val sentidos = remember { SentidosDaCaminhada() }
-    LaunchedEffect(Unit) {
-        while (true) {
-            sentidos.permitida = Poder.LOCALIZACAO.liberado(ctx) // liberada nas Configurações, ou tirada no meio
-            delay(RELER_PERMISSAO_MS)
+    private var gps: LocationManager? = null
+    private var sensores: SensorManager? = null
+    private val principal = Handler(Looper.getMainLooper())
+    private val ouvinte = object : LocationListener {
+        override fun onLocationChanged(local: Location) = fixo(local)
+
+        // Antes do Android 11 estes três não têm corpo pronto: sem eles, o app cai quando a localização liga ou desliga
+        override fun onProviderEnabled(provider: String) {}
+
+        override fun onProviderDisabled(provider: String) {}
+
+        @Deprecated("Chamado só antes do Android 10")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+    }
+    private val satelites = object : GnssStatus.Callback() {
+        override fun onSatelliteStatusChanged(status: GnssStatus) {
+            ceu = sinalDaL1(status)
         }
     }
-    DisposableEffect(ligado && sentidos.permitida) {
-        if (!ligado || !sentidos.permitida) {
-            if (ligado) Log.w(TAG, "Caminhada: sem permissão de localização, o tempo não anda")
-            return@DisposableEffect onDispose {}
+    private val acelerometro = object : SensorEventListener {
+        override fun onSensorChanged(e: SensorEvent) {
+            val (x, y, z) = e.values
+            // O relógio do sensor é o mesmo dos fixos (elapsedRealtimeNanos)
+            detector.acelerometro(e.timestamp / 1_000_000, sqrt(x * x + y * y + z * z))
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    /** O GPS, os satélites e o acelerômetro estão ligados. */
+    var ligados = false
+        private set
+
+    /**
+     * Liga o GPS (um fixo por segundo), os satélites e o acelerômetro, se a localização está permitida ([permitida],
+     * relida aqui). Já ligados, não faz nada. Sem permissão, [permitida] fica false e nada liga; sem GPS no celular,
+     * [semGps]. Chamado no serviço (a caminhada segue com a tela fechada) e no TesteDoGps.
+     */
+    fun ligar(ctx: Context) {
+        permitida = Poder.LOCALIZACAO.liberado(ctx)
+        if (ligados) return
+        if (!permitida) {
+            Log.w(TAG, "Caminhada: sem permissão de localização, o tempo não anda")
+            return
         }
         val gps = ctx.getSystemService(LocationManager::class.java)
         val sensores = ctx.getSystemService(SensorManager::class.java)
-        val principal = Handler(Looper.getMainLooper())
-        val ouvinte = object : LocationListener {
-            override fun onLocationChanged(local: Location) = sentidos.fixo(local)
-
-            // Antes do Android 11 estes três não têm corpo pronto: sem eles, o app cai quando a localização liga ou desliga
-            override fun onProviderEnabled(provider: String) {}
-
-            override fun onProviderDisabled(provider: String) {}
-
-            @Deprecated("Chamado só antes do Android 10")
-            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        }
-        val satelites = object : GnssStatus.Callback() {
-            override fun onSatelliteStatusChanged(status: GnssStatus) {
-                sentidos.ceu = sinalDaL1(status)
-            }
-        }
-        val acelerometro = object : SensorEventListener {
-            override fun onSensorChanged(e: SensorEvent) {
-                val (x, y, z) = e.values
-                // O relógio do sensor é o mesmo dos fixos (elapsedRealtimeNanos)
-                sentidos.detector.acelerometro(e.timestamp / 1_000_000, sqrt(x * x + y * y + z * z))
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-        }
         try {
             ouvirGps(gps, ouvinte, satelites, principal)
             sensores.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sensores.registerListener(acelerometro, it, SensorManager.SENSOR_DELAY_GAME) }
                 ?: Log.w(TAG, "Caminhada: o celular não tem acelerômetro")
+            this.gps = gps
+            this.sensores = sensores
+            ligados = true
             Log.i(TAG, "Caminhada: GPS e acelerômetro ligados")
         } catch (e: SecurityException) {
-            // Permissão tirada entre a conferência e o pedido: o laço acima relê e a tela mostra o botão
+            // Permissão tirada entre a conferência e o pedido: quem chama relê e a tela mostra o botão
             Log.w(TAG, "Caminhada: sem permissão de localização", e)
-            sentidos.permitida = false
+            permitida = false
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "Caminhada: o celular não tem GPS, defeito: o alarme desliga", e)
-            sentidos.semGps = true
+            semGps = true
         }
-        onDispose {
-            gps.removeUpdates(ouvinte)
-            gps.unregisterGnssStatusCallback(satelites)
-            sensores.unregisterListener(acelerometro)
-            Log.i(TAG, "Caminhada: GPS e acelerômetro desligados")
+    }
+
+    /** Desliga tudo (fim da caminhada, a música voltou, o alarme acabou). */
+    fun desligar() {
+        if (!ligados) return
+        gps?.removeUpdates(ouvinte)
+        gps?.unregisterGnssStatusCallback(satelites)
+        sensores?.unregisterListener(acelerometro)
+        ligados = false
+        Log.i(TAG, "Caminhada: GPS e acelerômetro desligados")
+    }
+}
+
+/**
+ * O relógio da caminhada, fora da tela (no serviço, ou no TesteDoGps): a cada [CONFERIR_MS] lê os [sentidos], soma o
+ * que cada avaliação manda ([Avaliacao.soma]) a partir de [andadoInicialMs] e avisa: [aoSomar] quando o somado ou o
+ * que está conferindo mudam; [aoViver] a cada [AVISO_ANDANDO_MS] com sinal de vida ([Avaliacao.valeProBipe]: passo
+ * ou velocidade no GPS, somando ou não) e no instante em que o sinal para (os bipes de parado contam daí);
+ * [aoConcluir] uma vez, com [metaMs] somados (a meta pode subir no meio: alarme de verdade no lugar do teste);
+ * [aoDefeito] num celular sem GPS nenhum (um defeito não prende ninguém). Era o laço da tela da caminhada: foi pro
+ * serviço pra caminhada seguir com a tela fechada, no bolso (10-22).
+ */
+class ContadorDaCaminhada(
+    private val ctx: Context,
+    private val sentidos: SentidosDaCaminhada,
+    andadoInicialMs: Long,
+    private val metaMs: () -> Long,
+    private val aoSomar: (andadoMs: Long, conferindoMs: Long) -> Unit,
+    private val aoViver: (andadoMs: Long) -> Unit,
+    private val aoConcluir: () -> Unit,
+    private val aoDefeito: () -> Unit,
+) {
+    var andadoMs = andadoInicialMs
+        private set
+    var conferindoMs = 0L
+        private set
+    private val principal = Handler(Looper.getMainLooper())
+    private var ultimoAviso = 0L
+    private var andavaAntes = false
+    private var ligadaAntes = true
+    private var acabou = false
+    private val tique = object : Runnable {
+        override fun run() {
+            conferir()
+            if (!acabou) principal.postDelayed(this, CONFERIR_MS)
+        }
+    }
+
+    fun ligar() {
+        Log.i(TAG, "Caminhada: começou, ${andadoMs / 1000} s já andados de ${metaMs() / 1000}")
+        sentidos.aoAvaliar = { avaliacao ->
+            andadoMs += avaliacao.soma
+            conferindoMs = avaliacao.conferindo
+            aoSomar(andadoMs, conferindoMs)
+        }
+        principal.post(tique)
+    }
+
+    fun desligar() {
+        acabou = true
+        sentidos.aoAvaliar = null
+        principal.removeCallbacks(tique)
+    }
+
+    private fun conferir() {
+        val agora = SystemClock.elapsedRealtime()
+        val ligada = gpsLigado(ctx)
+        if (ligada != ligadaAntes) Log.i(TAG, "Caminhada: localização ${if (ligada) "ligada" else "desligada"}")
+        ligadaAntes = ligada
+        if (sentidos.semGps) {
+            acabou = true
+            return aoDefeito()
+        }
+        val leitura = recente(sentidos.leitura, agora)
+        val andando = leitura?.avaliacao?.valeProBipe == true
+        if (andando != andavaAntes) Log.i(TAG, "Caminhada: ${retorno(leitura).second}, ${andadoMs / 1000} s de ${metaMs() / 1000}")
+        // A cada segundo andando, e no instante em que parou: a contagem pro bipe começa daí
+        if (andando && agora - ultimoAviso >= AVISO_ANDANDO_MS || andavaAntes && !andando) {
+            aoViver(andadoMs)
+            ultimoAviso = agora
+        }
+        andavaAntes = andando
+        if (andadoMs >= metaMs()) {
+            acabou = true
+            Log.i(TAG, "Missão: caminhada completa, alarme desligado")
+            aoConcluir()
+        }
+    }
+}
+
+/**
+ * Os [SentidosDaCaminhada] de uma tela (o TesteDoGps), ligados enquanto ela vive e a localização está permitida
+ * (relida a cada [RELER_PERMISSAO_MS]). No alarme, quem os tem é o serviço.
+ */
+@Composable
+fun rememberSentidosDaCaminhada(): SentidosDaCaminhada {
+    val ctx = LocalContext.current
+    val sentidos = remember { SentidosDaCaminhada() }
+    DisposableEffect(Unit) {
+        sentidos.ligar(ctx)
+        onDispose { sentidos.desligar() }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(RELER_PERMISSAO_MS)
+            sentidos.ligar(ctx) // liberada nas Configurações no meio: liga; já ligados, não faz nada
         }
     }
     return sentidos
 }
 
 /**
- * Etapa da caminhada: um anel que enche com o tempo andando a pé (o [SentidosDaCaminhada.detector], um fixo do GPS
- * por segundo) até somar [metaMs], começando de [andadoInicialMs] (o que o serviço já guardou: a tela voltou depois
- * de sair, ou foi recriada no meio). Por cima, mais claro, o que ainda está conferindo. Até [prazoAte]
- * (SystemClock.elapsedRealtime) é o prazo pra sair de casa: andar nele já conta, e a tela mostra quanto falta.
- * [onAndando] recebe o tempo já somado a cada [AVISO_ANDANDO_MS] com sinal de vida ([Avaliacao.valeProBipe]: passo ou
- * velocidade no GPS, somando ou não) e no instante em que o sinal para; depois do prazo, parado, a tela mostra a
- * contagem pro bipe a partir do último sinal recebido pelo serviço ([ultimoPasso], [segundosProBipe]); os bipes são
- * da vigia de lá.
+ * Etapa da caminhada, só a tela: o anel com o tempo andando ([andadoMs], somado pelo serviço com o [ContadorDaCaminhada]
+ * sobre os [sentidos] dele) até [metaMs], com o que ainda está conferindo ([conferindoMs]) mais claro. Até [prazoAte]
+ * (SystemClock.elapsedRealtime) é o prazo pra sair de casa: andar nele já conta, e a tela mostra quanto falta; depois,
+ * parado, a contagem pro bipe a partir do último sinal de vida recebido pelo serviço ([ultimoPasso], [segundosProBipe]).
+ * Tudo o que decide (somar, bipar, concluir) é do serviço, que segue com a tela fechada: aqui só se desenha.
  *
  * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada
- * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. [onDefeito] só num
- * celular sem GPS nenhum, pra um defeito não prender ninguém (como a câmera que não abre).
- * [onConcluiu] uma vez, com o anel completo. Com [detalhar] (o TesteDoGps), sem prazo nem bipe. No prazo, o botão
- * das ondas ([ondasMudas], [onOndas]): quem não quer ouvir o mar emudece nesta manhã. Depois do prazo, no primeiro
- * bipe de parado, a [miniTarefa] do serviço: a frase pra repetir e ganhar mais prazo ([onMiniTarefaFeita]).
+ * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. Com [detalhar] (o
+ * TesteDoGps), sem prazo nem bipe. No prazo, o botão das ondas ([ondasMudas], [onOndas]): quem não quer ouvir o mar
+ * emudece nesta manhã. Depois do prazo, no primeiro bipe de parado, a [miniTarefa] do serviço: a frase pra repetir e
+ * ganhar mais prazo (quem escuta é o serviço; a tela mostra o que ele ouve).
  */
 @Composable
 fun EtapaCaminhada(
     sentidos: SentidosDaCaminhada,
-    andadoInicialMs: Long,
+    andadoMs: Long,
+    conferindoMs: Long,
     metaMs: Long,
     prazoAte: Long,
     ultimoPasso: Long,
-    onAndando: (andadoMs: Long) -> Unit,
-    onDefeito: () -> Unit,
-    onConcluiu: () -> Unit,
     detalhar: Boolean = false,
     ondasMudas: Boolean = false,
     onOndas: ((ligadas: Boolean) -> Unit)? = null,
     miniTarefa: MiniTarefa? = null,
-    onMiniTarefaFeita: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
-    val avisarAndando by rememberUpdatedState(onAndando)
-    val avisarDefeito by rememberUpdatedState(onDefeito)
-    val concluir by rememberUpdatedState(onConcluiu)
-    // A meta pode subir no meio: alarme de verdade disparando durante o teste (EmAndamento.juntar)
-    val meta by rememberUpdatedState(metaMs)
-    // Continua do que o serviço guardou; parado, o tempo andado fica onde está e nunca desce
-    var andadoMs by remember { mutableLongStateOf(andadoInicialMs) }
-    var conferindoMs by remember { mutableLongStateOf(0L) }
     var ligada by remember { mutableStateOf(gpsLigado(ctx)) }
     var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-
-    DisposableEffect(sentidos) {
-        Log.i(TAG, "Caminhada: começou, ${andadoMs / 1000} s já andados de ${meta / 1000}")
-        sentidos.aoAvaliar = { avaliacao ->
-            andadoMs += avaliacao.soma
-            conferindoMs = avaliacao.conferindo
-        }
-        onDispose { sentidos.aoAvaliar = null }
-    }
-    LaunchedEffect(sentidos.semGps) { if (sentidos.semGps) avisarDefeito() }
-
     LaunchedEffect(Unit) {
-        var ultimoAviso = 0L
-        var andavaAntes = false
         while (true) {
             delay(CONFERIR_MS)
             agora = SystemClock.elapsedRealtime()
-            val ligadaAgora = gpsLigado(ctx)
-            if (ligadaAgora != ligada) Log.i(TAG, "Caminhada: localização ${if (ligadaAgora) "ligada" else "desligada"}")
-            ligada = ligadaAgora
-            val andando = recente(sentidos.leitura, agora)?.avaliacao?.valeProBipe == true
-            if (andando != andavaAntes) Log.i(TAG, "Caminhada: ${retorno(recente(sentidos.leitura, agora)).second}, ${andadoMs / 1000} s de ${meta / 1000}")
-            // A cada segundo andando, e no instante em que parou: a contagem pro bipe começa daí
-            if (andando && agora - ultimoAviso >= AVISO_ANDANDO_MS || andavaAntes && !andando) {
-                avisarAndando(andadoMs)
-                ultimoAviso = agora
-            }
-            andavaAntes = andando
-            if (andadoMs >= meta) {
-                Log.i(TAG, "Missão: caminhada completa, alarme desligado")
-                concluir()
-                break
-            }
+            ligada = gpsLigado(ctx)
         }
     }
 
@@ -362,9 +422,9 @@ fun EtapaCaminhada(
         } else {
             BarraDoBipe(paradoMs)
         }
-        if (miniTarefa != null && onMiniTarefaFeita != null) {
+        if (miniTarefa != null) {
             Spacer(Modifier.height(12.dp))
-            MiniTarefaDoPrazo(miniTarefa, onMiniTarefaFeita)
+            MiniTarefaDoPrazo(miniTarefa)
         }
         if (!sentidos.permitida) {
             Spacer(Modifier.height(12.dp))
@@ -384,29 +444,13 @@ fun EtapaCaminhada(
 private val TRILHA_TAMANHO = 180.dp
 
 /**
- * A mini tarefa do prazo pra sair ([MiniTarefa]): a frase que a voz ofereceu e, na vez da pessoa ([MiniTarefa.suaVez],
- * depois de a voz terminar), a escuta em inglês até ela repetir ([repetiu]), pintando de verde as palavras já ditas
- * ([palavrasDitas]), como na verificação da câmera. Repetida, [onFeita]: o serviço dá o prazo extra.
+ * A mini tarefa do prazo pra sair ([MiniTarefa]), só a tela: a frase que a voz ofereceu e, na vez da pessoa
+ * ([MiniTarefa.suaVez], depois de a voz terminar), o que o serviço está ouvindo ([MiniTarefa.ouvido]), pintando de
+ * verde as palavras já ditas ([palavrasDitas]), como na verificação da câmera. Quem escuta e dá o prazo é o serviço.
  */
 @Composable
-private fun MiniTarefaDoPrazo(tarefa: MiniTarefa, onFeita: () -> Unit) {
-    val ctx = LocalContext.current
-    val feita by rememberUpdatedState(onFeita)
-    var ouvido by remember(tarefa.frase) { mutableStateOf("") }
-    if (tarefa.suaVez) {
-        DisposableEffect(tarefa.frase) {
-            val ouvinte = Ouvinte(
-                ctx, "mini tarefa", aceita = { repetiu(tarefa.frase, it) },
-                onOuviu = { ouvido = it },
-                onAceito = { feita() },
-                onIndisponivel = {},
-                idioma = "en-US",
-                juntar = true,
-            )
-            ouvinte.comecar()
-            onDispose { ouvinte.parar() }
-        }
-    }
+private fun MiniTarefaDoPrazo(tarefa: MiniTarefa) {
+    val ouvido = tarefa.ouvido
     Column(
         Modifier.fillMaxWidth(0.92f).background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(20.dp)).padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

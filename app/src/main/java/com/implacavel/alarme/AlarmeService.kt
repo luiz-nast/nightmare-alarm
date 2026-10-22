@@ -54,8 +54,9 @@ import java.time.LocalTime
  *   direto pra caminhada). Quem decide tudo são os relógios daqui: a IA só produz o texto das falas.
  *
  * Comandos pela action do Intent, cada um com uma função no companion: tocar, missão cumprida,
- * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz e andando. Na conversa, quem ouve é a
- * [Escuta], daqui mesmo.
+ * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz, ondas, mini tarefa, fase e cancelar teste. Na
+ * conversa, quem ouve é a [Escuta], daqui mesmo; na caminhada, o GPS e os passos ([SentidosDaCaminhada]) e o relógio
+ * deles ([ContadorDaCaminhada]) também são daqui: a conversa e a caminhada seguem com a tela fechada.
  * O comando reexibir vem da notificação arrastada pro lado.
  */
 /** Um passo da verificação do meio: a [frase] da vez ([numero] de [total]; vazia na fala de abertura e no agradecimento) e se é a [suaVez] de repetir. */
@@ -78,14 +79,18 @@ data class Conversa(
     val procurando: String = "",
 )
 
-/** A caminhada da manhã: o tempo já [andadoMs] (guardado pelo serviço), a meta e o fim do prazo pra sair de casa ([prazoAte], SystemClock.elapsedRealtime). */
-data class Caminhada(val andadoMs: Long, val metaMs: Long, val prazoAte: Long)
+/**
+ * A caminhada da manhã: o tempo já [andadoMs] (somado pelo serviço, [ContadorDaCaminhada]), o que ainda está
+ * [conferindoMs], a meta e o fim do prazo pra sair de casa ([prazoAte], SystemClock.elapsedRealtime).
+ */
+data class Caminhada(val andadoMs: Long, val metaMs: Long, val prazoAte: Long, val conferindoMs: Long = 0)
 
 /**
- * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a [frase] pra repetir e ganhar mais prazo, e se já é a
- * [suaVez] de repetir (depois de a voz terminar de oferecer: antes, o reconhecedor ouviria a própria voz dizendo a frase).
+ * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a [frase] pra repetir e ganhar mais prazo, se já é a
+ * [suaVez] de repetir (depois de a voz terminar de oferecer: antes, o reconhecedor ouviria a própria voz dizendo a
+ * frase) e o que o reconhecedor do serviço já [ouvido].
  */
-data class MiniTarefa(val frase: String, val suaVez: Boolean)
+data class MiniTarefa(val frase: String, val suaVez: Boolean, val ouvido: String = "")
 
 /** As etapas do despertador "conversa + caminhada", depois do STOP e do bom dia. */
 private enum class EtapaDaManha { CONVERSA, CAMINHADA }
@@ -108,7 +113,6 @@ class AlarmeService : Service() {
         private const val ACAO_OUVIU = "ouviu"
         private const val ACAO_REPETIU = "repetiu"
         private const val ACAO_SEM_VOZ = "sem_voz"
-        private const val ACAO_ANDANDO = "andando"
         private const val ACAO_ONDAS = "ondas"
         private const val ACAO_MINI_TAREFA = "mini_tarefa"
         private const val ACAO_FASE = "fase"
@@ -117,7 +121,6 @@ class AlarmeService : Service() {
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_OLHADO = "olhado"
         private const val EXTRA_COMEMORAR = "comemorar"
-        private const val EXTRA_ANDADO = "andado"
         private const val EXTRA_LIGADAS = "ligadas"
         private const val EXTRA_FASE = "fase"
 
@@ -132,6 +135,9 @@ class AlarmeService : Service() {
 
         /** Tempo sem a tela do alarme voltar, pra desbloquear o celular ou liberar a câmera. A música continua. */
         private const val TEMPO_FORA_MS = 60_000L
+
+        /** De quanto em quanto tempo o serviço relê a permissão de localização da caminhada (liberada no meio, os sentidos ligam). */
+        private const val RELER_LOCALIZACAO_MS = 1_000L
 
         private const val LIMITE_QUEDAS = 2
 
@@ -264,6 +270,15 @@ class AlarmeService : Service() {
         /** As ondas do prazo pra sair estão mudas (o botão na tela da caminhada). Toda manhã começa ligada: o dono desliga se quiser. */
         val ondasMudas: StateFlow<Boolean> = _ondasMudas.asStateFlow()
 
+        private val _sentidos = MutableStateFlow<SentidosDaCaminhada?>(null)
+
+        /**
+         * O GPS, os satélites e o acelerômetro da manhã com caminhada, do serviço (ligados no STOP, pra o GPS acertar a
+         * mira durante a conversa; null fora dela): a tela da caminhada desenha a leitura e a trilha daqui. No serviço, e
+         * não na tela, pra caminhada seguir com a tela fechada ou o celular no bolso (serviço com o tipo "location").
+         */
+        val sentidos: StateFlow<SentidosDaCaminhada?> = _sentidos.asStateFlow()
+
         private val _miniTarefa = MutableStateFlow<MiniTarefa?>(null)
 
         /** A mini tarefa do prazo pra sair oferecida agora (null = nenhuma): a tela mostra a frase e, na vez da pessoa, escuta. */
@@ -322,12 +337,6 @@ class AlarmeService : Service() {
         /** Na verificação, o reconhecimento de voz não funciona (ex.: inglês sem internet): ela é pulada. */
         fun semVozNaVerificacao(ctx: Context) { ctx.startService(comando(ctx, ACAO_SEM_VOZ)) }
 
-
-        /**
-         * Sinal da etapa da caminhada de que a pessoa está andando (ou andava até agora), com o tempo
-         * [andadoMs] já somado: a contagem pro bipe de parado recomeça.
-         */
-        fun andando(ctx: Context, andadoMs: Long) { ctx.startService(comando(ctx, ACAO_ANDANDO).putExtra(EXTRA_ANDADO, andadoMs)) }
 
         /** O botão das ondas na tela da caminhada: [ligadas] ou mudas, nesta manhã. */
         fun ondas(ctx: Context, ligadas: Boolean) { ctx.startService(comando(ctx, ACAO_ONDAS).putExtra(EXTRA_LIGADAS, ligadas)) }
@@ -392,6 +401,10 @@ class AlarmeService : Service() {
     private var andado = 0L // tempo andando na caminhada
     private var prazoAte = 0L // fim do prazo pra sair de casa (SystemClock.elapsedRealtime; 0 = ainda não começou)
     private var bipesParado = 0 // da vigia da caminhada, desde o último sinal de "andando"
+    private var sentidosDoServico: SentidosDaCaminhada? = null // o GPS e os passos da caminhada (o mesmo objeto que [sentidos] mostra)
+    private var contador: ContadorDaCaminhada? = null // o relógio da caminhada, sobre os sentidos do serviço
+    private var ouvinteDaMiniTarefa: Ouvinte? = null // o reconhecedor da mini tarefa do prazo, na vez da pessoa
+    private var ultimoTextoDaNotificacao = "" // só manda a notificação de novo quando o texto muda
     private var naoEntendidos = 0 // falas seguidas da pessoa que a IA não entendeu (ruído, português)
     private var ultimaFalaEntendida = "" // a última fala de verdade da IA: a que ela repete depois do bipe do não entendi
     private var preparoExtraUsado = false // a mini tarefa do prazo já deu o extra desta manhã
@@ -418,6 +431,7 @@ class AlarmeService : Service() {
             Agendador.agendarRetomada(this@AlarmeService)
             processador.acquire(RENOVAR_MS * 12)
             salvarProgresso()
+            atualizarNotificacao()
             handler.postDelayed(this, RENOVAR_MS)
         }
     }
@@ -609,7 +623,6 @@ class AlarmeService : Service() {
                 handler.removeCallbacks(silencio)
                 agradecer()
             }
-            acao == ACAO_ANDANDO -> andou(intent.getLongExtra(EXTRA_ANDADO, 0L))
             acao == ACAO_ONDAS -> ondas(intent.getBooleanExtra(EXTRA_LIGADAS, true))
             acao == ACAO_MINI_TAREFA -> miniTarefaFeita()
             // Os botões de fase e de cancelar só existem na tela de um alarme de teste; um comando atrasado não mexe num alarme de verdade
@@ -634,6 +647,7 @@ class AlarmeService : Service() {
         voz?.desligar()
         rodadaConversa++ // notícias e IA atrasadas não chegam em ninguém
         pararEscuta()
+        desligarSentidos()
         motor?.desligar()
         MotorDaConversa.liberar()
         _silenciado.value = false
@@ -759,6 +773,11 @@ class AlarmeService : Service() {
         handler.removeCallbacks(chamarDeVolta)
         if (aberta) {
             notificacoes().cancel(Notificacoes.ID_CHAMADA)
+        } else if (emSegundoPlano()) {
+            // A conversa e a caminhada são do serviço (microfone, GPS e passos): seguem com a tela fechada, e a
+            // pessoa pode usar outro app. A notificação mostra onde está e traz a tela de volta num toque
+            Log.i(TAG, "Tela do alarme fechada: a ${if (_conversa.value != null) "conversa" else "caminhada"} segue em segundo plano")
+            atualizarNotificacao()
         } else {
             sirene.volume(1f)
             // Quem foi desbloquear o celular ou liberar a câmera ganha um tempo (a música não para por isso)
@@ -766,6 +785,13 @@ class AlarmeService : Service() {
             handler.postDelayed(chamarDeVolta, espera)
         }
     }
+
+    /**
+     * A etapa de agora vive no serviço e segue com a tela fechada: a conversa e a caminhada do "conversa + caminhada"
+     * (depois do bom dia). A música, o bom dia e a câmera (que precisa da tela pra ver o rosto) ainda chamam a tela de volta.
+     */
+    private fun emSegundoPlano(): Boolean =
+        _silenciado.value && !_saudando.value && manhaNova() && (_conversa.value != null || _caminhada.value != null)
 
     /**
      * A pessoa disse "stop": a música para e a voz dá bom dia ([textoDaSaudacao]); [PAUSA_DEPOIS_DA_SAUDACAO_MS]
@@ -782,11 +808,15 @@ class AlarmeService : Service() {
         // Missão de 40 min já começada: um "conversa + caminhada" que juntar depois não muda o caminho
         if (manhaNova()) {
             prepararManha()
+            ligarSentidos() // o GPS acerta a mira durante a conversa
         } else if (caminho == null) {
             caminho = CaminhoDaManha.ANTIGO
             soltarIa() // uma IA preparada durante a música não vai servir
         }
         _comCaminhada.value = manhaNova()
+        // Com a tela do alarme na frente, o serviço ganha os tipos "location" e "microphone": é agora que o Android
+        // deixa, e com eles a conversa e a caminhada seguem com a tela fechada
+        _tocando.value?.let { mostrarNotificacao(it) }
         // Do bom dia ao fim da conversa, o alto-falante não dorme: a fala depois de um silêncio começaria baixinha
         if (manhaNova() && etapa != EtapaDaManha.CAMINHADA) sirene.manterAcordado(true)
         handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
@@ -1508,6 +1538,61 @@ class AlarmeService : Service() {
         ondasNoPrazo()
         sirene.manterAcordado(false)
         adiarVigiaDaCaminhada()
+        // O relógio da caminhada, sobre os sentidos do serviço: soma, dá o sinal de vida (os bipes contam dele) e conclui
+        contador?.desligar()
+        val s = ligarSentidos()
+        contador = ContadorDaCaminhada(
+            this, s, andado,
+            metaMs = { _tocando.value?.let { metaCaminhada(it, tempos()) } ?: metaCaminhada(alarme, tempos()) },
+            aoSomar = { somado, conferindo ->
+                andado = maxOf(andado, somado)
+                _caminhada.value = _caminhada.value?.copy(andadoMs = andado, conferindoMs = conferindo)
+            },
+            aoViver = ::andou,
+            aoConcluir = { concluir(comemorar = true) },
+            aoDefeito = {
+                Log.w(TAG, "Caminhada: o celular não tem GPS, defeito: o alarme desliga")
+                concluir(comemorar = false)
+            },
+        ).also { it.ligar() }
+    }
+
+    /** Os sentidos da caminhada do serviço, ligados (ou religados, se a localização foi liberada no meio). */
+    private fun ligarSentidos(): SentidosDaCaminhada {
+        val s = sentidosDoServico ?: SentidosDaCaminhada().also {
+            sentidosDoServico = it
+            _sentidos.value = it
+            handler.removeCallbacks(relerLocalizacao)
+            handler.postDelayed(relerLocalizacao, RELER_LOCALIZACAO_MS)
+        }
+        s.ligar(this)
+        return s
+    }
+
+    /** Liberada nas Configurações no meio (ou tirada): os sentidos religam, ou a tela mostra o botão. */
+    private val relerLocalizacao = object : Runnable {
+        override fun run() {
+            val s = sentidosDoServico ?: return
+            s.ligar(this@AlarmeService)
+            handler.postDelayed(this, RELER_LOCALIZACAO_MS)
+        }
+    }
+
+    /** O relógio e os sentidos da caminhada desligados (a música voltou, ou o alarme acabou). */
+    private fun desligarSentidos() {
+        pararMiniTarefa()
+        contador?.desligar()
+        contador = null
+        handler.removeCallbacks(relerLocalizacao)
+        sentidosDoServico?.desligar()
+        sentidosDoServico = null
+        _sentidos.value = null
+    }
+
+    /** O reconhecedor da mini tarefa, se estava ouvindo, para. */
+    private fun pararMiniTarefa() {
+        ouvinteDaMiniTarefa?.parar()
+        ouvinteDaMiniTarefa = null
     }
 
     /** As ondas enquanto durar o prazo pra sair (ligadas, se o dono não emudeceu nesta manhã) e o fim delas marcado no relógio. */
@@ -1537,9 +1622,21 @@ class AlarmeService : Service() {
      */
     private fun oferecerMiniTarefa() {
         Log.i(TAG, "Caminhada: mini tarefa oferecida (mais prazo se repetir a frase)")
-        _miniTarefa.value = MiniTarefa(fraseDaMiniTarefa, suaVez = false)
+        val frase = fraseDaMiniTarefa
+        _miniTarefa.value = MiniTarefa(frase, suaVez = false)
         sirene.falar(voz?.fixa(FALA_DA_MINI_TAREFA)) {
+            if (_miniTarefa.value?.frase != frase) return@falar // já sumiu (ele andou) ou a música voltou
             _miniTarefa.value = _miniTarefa.value?.copy(suaVez = true)
+            // O reconhecedor é do serviço: a mini tarefa vale com a tela fechada também
+            pararMiniTarefa()
+            ouvinteDaMiniTarefa = Ouvinte(
+                this, "mini tarefa", aceita = { repetiu(frase, it) },
+                onOuviu = { ouvido -> _miniTarefa.value = _miniTarefa.value?.copy(ouvido = ouvido) },
+                onAceito = { miniTarefaFeita() },
+                onIndisponivel = { Log.w(TAG, "Caminhada: sem reconhecimento de voz pra mini tarefa") },
+                idioma = "en-US",
+                juntar = true,
+            ).also { it.comecar() }
         }
     }
 
@@ -1549,6 +1646,7 @@ class AlarmeService : Service() {
         if (_miniTarefa.value?.suaVez != true || _caminhada.value == null || preparoExtraUsado || cumprido) return
         Log.i(TAG, "Caminhada: mini tarefa feita, mais ${preparoExtra(alarme) / 1000} s de prazo pra sair")
         preparoExtraUsado = true
+        pararMiniTarefa()
         _miniTarefa.value = null
         prazoAte = SystemClock.elapsedRealtime() + preparoExtra(alarme)
         _caminhada.value = _caminhada.value?.copy(prazoAte = prazoAte)
@@ -1621,6 +1719,9 @@ class AlarmeService : Service() {
         val alarme = _tocando.value ?: return
         handler.removeCallbacks(fimDasOndas)
         handler.removeCallbacks(vigiaDaCaminhada)
+        contador?.desligar()
+        contador = null
+        pararMiniTarefa()
         sirene.ondas(false)
         _caminhada.value = null
         _miniTarefa.value = null
@@ -1651,7 +1752,7 @@ class AlarmeService : Service() {
         }
     }
 
-    /** Sinal de "andando" da etapa da caminhada: guarda o tempo andado e a contagem pro bipe recomeça. */
+    /** Sinal de vida do relógio da caminhada ([ContadorDaCaminhada]): guarda o tempo andado e a contagem pro bipe recomeça. */
     private fun andou(andadoMs: Long) {
         // Sinal atrasado, de quando a música voltou
         if (_caminhada.value == null || !_silenciado.value || _saudando.value || cumprido) return
@@ -1660,6 +1761,7 @@ class AlarmeService : Service() {
         // Andou depois do primeiro bipe: já acordou, a mini tarefa some e não volta
         if (_miniTarefa.value != null) {
             Log.i(TAG, "Caminhada: andou, a mini tarefa some")
+            pararMiniTarefa()
             _miniTarefa.value = null
             miniTarefaRetirada = true
         }
@@ -1693,6 +1795,7 @@ class AlarmeService : Service() {
     /** A música voltou: a etapa da manhã para (o que chegar depois de antes não vale), e o caminho e o progresso ficam. */
     private fun pausarManha() {
         rodadaConversa++
+        desligarSentidos()
         handler.removeCallbacks(fimDasOndas)
         sirene.ondas(false)
         sirene.manterAcordado(false)
@@ -1770,6 +1873,7 @@ class AlarmeService : Service() {
         handler.removeCallbacksAndMessages(null) // nenhuma renovação atrasada pode rearmar a retomada
         rodadaConversa++ // nem a IA nem uma voz atrasada da conversa falam mais
         pararEscuta()
+        desligarSentidos()
         motor?.desligar()
         motor = null
         MotorDaConversa.liberar()
@@ -1812,8 +1916,56 @@ class AlarmeService : Service() {
 
     /** Vira serviço em primeiro plano exibindo a notificação do alarme. */
     private fun mostrarNotificacao(alarme: Alarme) {
-        val tipo = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
-        ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), tipo)
+        val comum = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        val tipo = tipoDoServico(comum)
+        ultimoTextoDaNotificacao = textoDaNotificacao(alarme)
+        runCatching { ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), tipo) }
+            .onFailure {
+                // O Android não deixou os tipos de localização ou microfone (sem permissão, ou a tela não está na frente):
+                // segue só com o de sempre; a etapa então precisa da tela
+                Log.w(TAG, "Serviço: sem os tipos location e microphone (${it.javaClass.simpleName}: ${it.message?.take(100)})")
+                ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), comum)
+            }
+    }
+
+    /**
+     * Os tipos do serviço em primeiro plano: o de sempre ([comum]) e, depois do STOP numa manhã com caminhada, os de
+     * localização (o GPS da caminhada) e microfone (a conversa e a mini tarefa), que no Android 14+ são o que deixa o
+     * app seguir usando GPS e microfone com a tela fechada. Só com as permissões dadas: sem elas, o Android recusa.
+     */
+    private fun tipoDoServico(comum: Int): Int {
+        if (Build.VERSION.SDK_INT < 29 || !_silenciado.value || !manhaNova()) return comum
+        var tipo = comum
+        if (Poder.LOCALIZACAO.liberado(this)) tipo = tipo or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        if (Build.VERSION.SDK_INT >= 30 && Poder.MICROFONE.liberado(this)) tipo = tipo or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        return tipo
+    }
+
+    /** O texto da notificação com o que está acontecendo; se mudou, a notificação vai de novo (a mesma, só o texto). */
+    private fun atualizarNotificacao() {
+        val alarme = _tocando.value ?: return
+        if (cumprido) return
+        val texto = textoDaNotificacao(alarme)
+        if (texto == ultimoTextoDaNotificacao) return
+        ultimoTextoDaNotificacao = texto
+        notificacoes().notify(Notificacoes.ID_TOCANDO, criarNotificacao(alarme))
+    }
+
+    /** Onde o alarme está, pra notificação (a conversa e a caminhada seguem com a tela fechada: é por aqui que a pessoa acompanha). */
+    private fun textoDaNotificacao(alarme: Alarme): String {
+        val agora = hhmm(LocalTime.now())
+        val c = _conversa.value
+        val k = _caminhada.value
+        val relogio = SystemClock.elapsedRealtime()
+        return when {
+            !alarme.missao -> "$agora · ringing"
+            c != null -> "Talking with the AI · ${tempoAndado(c.conversadoMs)} of ${tempoAndado(c.metaMs)} · tap to come back"
+            k != null && relogio < k.prazoAte -> "Time to go out: ${tempoRestante(k.prazoAte - relogio)} · walked ${tempoAndado(k.andadoMs)} of ${tempoAndado(k.metaMs)}"
+            k != null -> "Walking · ${tempoAndado(k.andadoMs)} of ${tempoAndado(k.metaMs)} · tap to come back"
+            _silenciado.value -> "$agora · look at the camera"
+            alarme.caminhada -> "$agora · say STOP: talk + walk"
+            else -> "$agora · say STOP and look at the camera"
+        }
     }
 
     private fun criarNotificacao(alarme: Alarme): Notification {
@@ -1824,17 +1976,10 @@ class AlarmeService : Service() {
         )
         // Com a missão ligada, "Desligar" abre a tela da missão em vez de desligar direto
         val desligar = if (alarme.missao) telaCheia else comandoPendente(1, ACAO_DESLIGAR)
-        val agora = hhmm(LocalTime.now())
         return NotificationCompat.Builder(this, Notificacoes.CANAL_ALARME)
             .setSmallIcon(R.drawable.ic_alarme)
             .setContentTitle(alarme.nome)
-            .setContentText(
-                when {
-                    !alarme.missao -> "$agora · ringing"
-                    alarme.caminhada -> "$agora · say STOP: talk + walk"
-                    else -> "$agora · say STOP and look at the camera"
-                },
-            )
+            .setContentText(textoDaNotificacao(alarme))
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
