@@ -134,6 +134,9 @@ class AlarmeService : Service() {
         /** De quanto em quanto tempo o serviço relê a permissão de localização da caminhada (liberada no meio, os sentidos ligam). */
         private const val RELER_LOCALIZACAO_MS = 1_000L
 
+        /** Entre dois pedidos dos tipos do serviço ([atualizarTipos]): o Android recusou, não adianta pedir a cada segundo. */
+        private const val REPEDIR_TIPOS_MS = 15_000L
+
         private const val LIMITE_QUEDAS = 2
 
         /** Entre a saudação falada e o "Activity starting now". */
@@ -401,8 +404,9 @@ class AlarmeService : Service() {
     private var contador: ContadorDaCaminhada? = null // o relógio da caminhada, sobre os sentidos do serviço
     private var ouvinteDaMiniTarefa: Ouvinte? = null // o reconhecedor da mini tarefa do prazo, na vez da pessoa
     private var ultimoTextoDaNotificacao = "" // só manda a notificação de novo quando o texto muda
-    private var tiposPedidos = -1 // os tipos do serviço do último pedido ao Android ([atualizarTipos])
-    private var tiposDoServico = 0 // os que o Android deu
+    private var tiposDoServico = 0 // os tipos do serviço que o Android deu ([mostrarNotificacao])
+    private var tiposPedidos = 0 // os do último pedido ao Android, e quando foi ([atualizarTipos]: o mesmo pedido, recusado, espera)
+    private var tiposPedidosEm = 0L
     private var naoEntendidos = 0 // falas seguidas da pessoa que a IA não entendeu (ruído, português)
     private var ultimaFalaEntendida = "" // a última fala de verdade da IA: a que ela repete depois do bipe do não entendi
     private var preparoExtraUsado = false // a mini tarefa do prazo já deu o extra desta manhã
@@ -430,6 +434,7 @@ class AlarmeService : Service() {
             processador.acquire(RENOVAR_MS * 12)
             salvarProgresso()
             atualizarNotificacao()
+            atualizarTipos()
             handler.postDelayed(this, RENOVAR_MS)
         }
     }
@@ -764,6 +769,7 @@ class AlarmeService : Service() {
         handler.removeCallbacks(chamarDeVolta)
         if (aberta) {
             notificacoes().cancel(Notificacoes.ID_CHAMADA)
+            atualizarTipos() // uma permissão dada nas Configurações, com a tela de volta na frente
         } else if (emSegundoPlano()) {
             // A conversa e a caminhada são do serviço (microfone, GPS e passos): seguem com a tela fechada, e a
             // pessoa pode usar outro app. A notificação mostra onde está e traz a tela de volta num toque
@@ -1632,9 +1638,18 @@ class AlarmeService : Service() {
      * nunca terminaria e a manhã ficaria parada. E se a fala travar, a caminhada começa assim mesmo em [SAUDACAO_MAX_MS].
      */
     private fun irPraCaminhada() {
+        val alarme = _tocando.value ?: return
         val rodada = ++rodadaConversa // nada que estava pendente (IA, voz, fala da pessoa) vale mais
         etapa = EtapaDaManha.CAMINHADA
         voz?.cancelar()
+        // O bom dia acabou (sem a IA, a fala de sair vem logo depois dele): a tela mostra a fala no cartão da conversa e
+        // pode fechar nesse meio tempo, como na conversa (emSegundoPlano)
+        handler.removeCallbacks(comecarAtividade)
+        handler.removeCallbacks(anunciarInicio)
+        _saudando.value = false
+        if (_conversa.value == null) {
+            _conversa.value = Conversa(falaDaIa = falaDeSair(prazoSairDaquiAte()), suaVez = false, pensando = false, conversadoMs = conversadoMs, metaMs = metaDaConversa(alarme))
+        }
         var foi = false
         val seguir = {
             if (rodada == rodadaConversa && !foi) {
@@ -1748,22 +1763,34 @@ class AlarmeService : Service() {
 
     /**
      * A mini tarefa do prazo pra sair, no primeiro bipe de parado depois dele ([ofereceMiniTarefa]): a voz oferece a
-     * frase e, quando termina, é a vez dela de repetir (a tela escuta). Os bipes seguem enquanto isso.
+     * frase e, quando termina, é a vez dela de repetir (o serviço escuta). Os bipes de parado esperam a voz acabar (um
+     * bipe no meio abaixa a voz e a frase não se entende) e seguem subindo enquanto ela repete: a mini tarefa não é
+     * um jeito de calar os bipes. Sem reconhecimento de voz, a oferta sai e os bipes seguem.
      */
     private fun oferecerMiniTarefa() {
         Log.i(TAG, "Caminhada: mini tarefa oferecida (mais prazo se repetir a frase)")
         val frase = fraseDaMiniTarefa
         _miniTarefa.value = MiniTarefa(frase, suaVez = false)
+        handler.removeCallbacks(vigiaDaCaminhada)
         sirene.falar(voz?.fixa(FALA_DA_MINI_TAREFA)) {
             if (_miniTarefa.value?.frase != frase) return@falar // já sumiu (ele andou) ou a música voltou
             _miniTarefa.value = _miniTarefa.value?.copy(suaVez = true)
+            handler.postDelayed(vigiaDaCaminhada, ENTRE_BIPES_PARADO_MS)
             // O reconhecedor é do serviço: a mini tarefa vale com a tela fechada também
             pararMiniTarefa()
             ouvinteDaMiniTarefa = Ouvinte(
                 this, "mini tarefa", aceita = { repetiu(frase, it) },
                 onOuviu = { ouvido -> _miniTarefa.value = _miniTarefa.value?.copy(ouvido = ouvido) },
                 onAceito = { miniTarefaFeita() },
-                onIndisponivel = { Log.w(TAG, "Caminhada: sem reconhecimento de voz pra mini tarefa") },
+                onIndisponivel = {
+                    // Depois de [comecar] (pode avisar de dentro dele): o cartão "sua vez" sem ninguém ouvindo enganaria
+                    handler.post {
+                        if (_miniTarefa.value?.frase != frase) return@post
+                        Log.w(TAG, "Caminhada: sem reconhecimento de voz pra mini tarefa, a oferta sai")
+                        pararMiniTarefa()
+                        _miniTarefa.value = null
+                    }
+                },
                 idioma = "en-US",
                 juntar = true,
             ).also { it.comecar() }
@@ -1804,11 +1831,11 @@ class AlarmeService : Service() {
             FaseDoTeste.CONVERSA -> voltarPraConversa()
             FaseDoTeste.PREPARO -> {
                 prazoAte = 0L // o prazo começa de novo, inteiro
-                if (atual == FaseDoTeste.CONVERSA) terminarConversa("avançou no teste") else comecarCaminhada()
+                if (atual == FaseDoTeste.CONVERSA) saltarConversa() else comecarCaminhada()
             }
             FaseDoTeste.CAMINHADA -> {
                 prazoAte = agora // prazo já vencido: sem ondas, e os bipes de parado contam daqui
-                if (atual == FaseDoTeste.CONVERSA) terminarConversa("avançou no teste") else comecarCaminhada()
+                if (atual == FaseDoTeste.CONVERSA) saltarConversa() else comecarCaminhada()
             }
             FaseDoTeste.CAMERA_FACIL -> {
                 cancelarVerificacao()
@@ -1828,6 +1855,17 @@ class AlarmeService : Service() {
                 adiarVigia()
             }
         }
+    }
+
+    /**
+     * Dos botões do teste, da conversa pra caminhada: no meio da conversa, ela termina ([terminarConversa]). Com a fala
+     * de sair já tocando (a conversa acabou; a tela ainda mostra o cartão dela), a caminhada vem já, sem esperar a fala.
+     */
+    private fun saltarConversa() {
+        if (etapa == EtapaDaManha.CONVERSA) return terminarConversa("avançou no teste")
+        rodadaConversa++ // o "seguir" da fala de sair não vale mais: a caminhada começa aqui
+        _conversa.value = null
+        continuarManha()
     }
 
     /** A verificação em curso para (sem zerar nada): os sons e as frases atrasados não valem mais. */
@@ -2053,6 +2091,7 @@ class AlarmeService : Service() {
         val tipo = tipoDoServico(comum)
         ultimoTextoDaNotificacao = textoDaNotificacao(alarme)
         tiposPedidos = tipo
+        tiposPedidosEm = SystemClock.elapsedRealtime()
         tiposDoServico = tipo
         runCatching { ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), tipo) }
             .onFailure {
@@ -2069,12 +2108,18 @@ class AlarmeService : Service() {
     /**
      * Uma permissão dada no meio do alarme (os botões ALLOW LOCATION e ALLOW CAMERA): com a tela na frente, que é quando
      * o Android deixa, os tipos do serviço vão de novo, agora com o dela. Sem isso, com a tela fechada o GPS para de
-     * chegar e a câmera é fechada. Só quando o pedido mudaria ([tiposPedidos]), pra não repetir um pedido recusado.
+     * chegar e a câmera é fechada. Chamada a cada 5 s ([renovar]), quando a tela abre e quando a câmera ou o GPS ligam;
+     * só faz algo se os tipos que cabem diferem dos que o Android deu ([tiposDoServico]). Um pedido novo (permissão
+     * nova) vai na hora; o mesmo pedido de antes, recusado (o diálogo da permissão ainda fechando, por exemplo), é
+     * repetido só a cada [REPEDIR_TIPOS_MS], sem martelar.
      */
     private fun atualizarTipos() {
         val alarme = _tocando.value ?: return
-        if (!_silenciado.value || !telaAberta || cumprido || tipoDoServico(tipoComum()) == tiposPedidos) return
-        Log.i(TAG, "Serviço: permissão nova no meio do alarme, os tipos vão de novo")
+        if (!_silenciado.value || !telaAberta || cumprido) return
+        val cabem = tipoDoServico(tipoComum())
+        if (cabem == tiposDoServico) return
+        if (cabem == tiposPedidos && SystemClock.elapsedRealtime() - tiposPedidosEm < REPEDIR_TIPOS_MS) return
+        Log.i(TAG, "Serviço: os tipos que cabem mudaram no meio do alarme, vão de novo")
         mostrarNotificacao(alarme)
     }
 

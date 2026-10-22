@@ -112,6 +112,7 @@
              desliga no fim, e que fecha o menu de desligar e reiniciar nesse meio tempo. Veja VigiaDoDesligar.kt -->
         <service
             android:name=".VigiaDoDesligar"
+            android:directBootAware="true"
             android:exported="true"
             android:label="@string/vigia_do_desligar_nome"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

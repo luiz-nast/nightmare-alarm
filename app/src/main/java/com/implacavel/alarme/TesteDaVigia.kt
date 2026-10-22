@@ -43,7 +43,9 @@ class TesteDaVigia : BroadcastReceiver() {
                     if (VigiaDoDesligar.conectada) "Teste da vigia: OK, no ar em $passou ms; desligando"
                     else "Teste da vigia: FALHOU, o Android não pôs o serviço no ar em ${ESPERA_MS / 1000} s",
                 )
-                VigiaDoDesligar.desligar(app)
+                // Um alarme que começou a tocar no meio da espera já ligou a vigia pra ele: fica
+                if (AlarmeService.tocando.value != null) Log.i(TAG, "Teste da vigia: um alarme começou no meio, a vigia fica")
+                else VigiaDoDesligar.desligar(app)
                 fim.finish()
             }
         })
