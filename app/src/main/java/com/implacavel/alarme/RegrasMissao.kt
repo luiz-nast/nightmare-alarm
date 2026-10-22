@@ -221,6 +221,22 @@ fun ehMenuDeDesligar(pacote: String?, classe: String?, textos: List<String>): Bo
     return TEXTOS_DE_DESLIGAR.any { it in tudo } && TEXTOS_DE_REINICIAR.any { it in tudo }
 }
 
+/** O atalho de acessibilidade do celular que liga a vigia do menu de desligar ([VigiaDoDesligar.atalho]). */
+enum class AtalhoDaVigia { VOLUME, BOTAO }
+
+/**
+ * O aviso da vigia do menu de desligar na tela do alarme: ligada ([noAr]), o cadeado; desligada, com o [atalho] de
+ * acessibilidade configurado e sem a permissão do cabo ([automatica], que liga sozinha), o pedido pra ligar; sem jeito
+ * de ligar, nada (o alarme segue igual).
+ */
+fun avisoDaVigia(noAr: Boolean, automatica: Boolean, atalho: AtalhoDaVigia?): String? = when {
+    noAr -> "🔒 Power menu blocked"
+    automatica -> null
+    atalho == AtalhoDaVigia.VOLUME -> "Hold both volume keys for 3 s to block the power menu"
+    atalho == AtalhoDaVigia.BOTAO -> "Tap the accessibility button to block the power menu"
+    else -> null
+}
+
 private const val PACOTE_DO_MENU_DA_SAMSUNG = "com.samsung.android.globalactions"
 private val PACOTES_DO_SISTEMA = listOf("com.android.systemui", PACOTE_DO_MENU_DA_SAMSUNG, "android")
 private val TEXTOS_DE_DESLIGAR = listOf("power off", "desligar")

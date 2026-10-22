@@ -2,5 +2,5 @@
     <string name="app_name">Nightmare Alarm</string>
     <!-- O serviço de acessibilidade que fecha o menu de desligar enquanto o alarme toca (VigiaDoDesligar.kt) -->
     <string name="vigia_do_desligar_nome">Nightmare Alarm: block the power menu</string>
-    <string name="vigia_do_desligar_descricao">Nightmare Alarm turns this on by itself when an alarm starts ringing and off when the alarm ends, so it is never on during the day. While it is on, it looks only at system windows, to recognize the power off / restart menu and close it, so the alarm cannot be escaped by turning the phone off. It stores nothing.</string>
+    <string name="vigia_do_desligar_descricao">This is on only while a Nightmare Alarm rings: you turn it on with its shortcut when the alarm wakes you (hold both volume keys for 3 s), and it turns itself off when the alarm ends, so it is never on during the day. While it is on, it looks only at system windows, to recognize the power off / restart menu and close it, so the alarm cannot be escaped by turning the phone off. It stores nothing.</string>
 </resources>

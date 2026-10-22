@@ -34,8 +34,9 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     BATERIA("Unrestricted battery", "Keeps the phone from putting the app to sleep."),
     MENU_DE_DESLIGAR(
         "Block the power menu",
-        "While the alarm rings, the power off / restart menu closes by itself. The app turns it on only during the alarm, " +
-            "so bank apps don't flag it. Needs a one-time setup from a computer: tap Allow for the steps.",
+        "While the alarm rings, the power off / restart menu closes by itself. Once, in Accessibility › Installed apps › " +
+            "Nightmare Alarm, turn on its shortcut with the volume keys. When the alarm wakes you, hold both volume keys for 3 s; " +
+            "it turns itself off when the alarm ends, so bank apps don't flag it.",
     );
 
     fun liberado(ctx: Context): Boolean = when (this) {
@@ -50,7 +51,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
             canal == null || canal.importance >= NotificationManager.IMPORTANCE_HIGH
         }
         BATERIA -> ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
-        MENU_DE_DESLIGAR -> VigiaDoDesligar.podeLigar(ctx)
+        MENU_DE_DESLIGAR -> VigiaDoDesligar.podeLigar(ctx) || VigiaDoDesligar.atalho(ctx) != null
     }
 
     /** A permissão do diálogo do sistema, se ainda falta; null se já foi dada ou se este poder não tem diálogo. */
@@ -88,12 +89,8 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
             .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
             .putExtra(Settings.EXTRA_CHANNEL_ID, Notificacoes.CANAL_ALARME)
         BATERIA -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pacote(ctx))
-        // Não há tela no celular que dê a permissão: abre os passos no README (o comando pelo cabo)
-        MENU_DE_DESLIGAR -> Intent(Intent.ACTION_VIEW, PASSOS_DO_MENU_DE_DESLIGAR.toUri())
+        MENU_DE_DESLIGAR -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
     }
 
     private fun pacote(ctx: Context) = "package:${ctx.packageName}".toUri()
 }
-
-/** Os passos pra liberar a vigia do menu de desligar (a permissão vem pelo cabo), no README do projeto. */
-private const val PASSOS_DO_MENU_DE_DESLIGAR = "https://github.com/luiz-nast/nightmare-alarm#block-the-power-menu"

@@ -3,12 +3,16 @@
 // deixa um serviço de acessibilidade ver as janelas e apertar "voltar" por ele. Segurar o botão por uns 7 s reinicia o
 // celular à força, por hardware: isso ninguém segura, mas o alarme volta depois do reinício (BootReceiver).
 //
-// Ligada SÓ enquanto um alarme toca ([ligar] no começo, [desligar] no fim), pelo próprio app: um app de fora da Play
-// Store com acessibilidade ligada o dia inteiro é o retrato do "golpe da mão fantasma", e os bancos (o Nubank, pelo
-// "App access risk" do Android) avisam ou travam. Pra ligar e desligar sozinho, o app precisa da permissão
-// WRITE_SECURE_SETTINGS, dada uma vez pelo cabo (o dono roda o comando; veja o README):
-//   adb shell pm grant com.implacavel.alarme android.permission.WRITE_SECURE_SETTINGS
-// Se o serviço se vê ligado sem alarme tocando (ligado à mão, ou sobrou de um alarme que caiu), ele se desliga
+// Ligada SÓ enquanto um alarme toca: um app de fora da Play Store com acessibilidade ligada o dia inteiro é o retrato
+// do "golpe da mão fantasma", e os bancos (o Nubank, pelo "App access risk" do Android) avisam ou travam. O Android não
+// deixa app nenhum ligar a própria acessibilidade sozinho, então há dois jeitos de ligar:
+// - sem cabo (o do dono): ele põe a vigia no atalho de acessibilidade do celular, uma vez, nas Configurações; quando o
+//   alarme acorda, a tela pede ([avisoDaVigia]) e ele segura os dois botões de volume por 3 s. No fim do alarme, o
+//   próprio serviço se desliga ([desligar] → disableSelf);
+// - com a permissão WRITE_SECURE_SETTINGS, dada uma vez pelo cabo (opcional; veja o README), o app liga sozinho quando
+//   o alarme toca ([ligar]) e desliga no fim:
+//     adb shell pm grant com.implacavel.alarme android.permission.WRITE_SECURE_SETTINGS
+// Se o serviço se vê ligado sem alarme tocando (ligado à mão de noite, ou sobrou de um alarme que caiu), ele se desliga
 // sozinho ([SOBRA_MS]). Ligar e desligar a peça (o componente) não serve: o Android apaga o serviço da lista (testado).
 // Ligada à mão e o dia inteiro, como no Alarmy, foi tentado de novo na mesma noite (o dono não queria o comando), e o
 // Nubank acusou "comportamento suspeito" em poucas horas: sem a permissão, o app fica sem a vigia.
@@ -27,6 +31,8 @@ import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class VigiaDoDesligar : AccessibilityService() {
 
@@ -44,8 +50,31 @@ class VigiaDoDesligar : AccessibilityService() {
         /** Um alarme começou a tocar: a vigia entra na lista (os outros serviços ficam). Sem a permissão, nada. */
         fun ligar(ctx: Context) = trocar(ctx, ligada = true)
 
-        /** O alarme acabou: a vigia sai da lista, e o celular fica sem nenhum serviço nosso de acessibilidade. */
-        fun desligar(ctx: Context) = trocar(ctx, ligada = false)
+        /**
+         * O alarme acabou: a vigia sai da lista, e o celular fica sem nenhum serviço nosso de acessibilidade. Com a
+         * permissão, pelas Configurações; sem ela (ligada pelo atalho), o próprio serviço se desliga.
+         */
+        fun desligar(ctx: Context) {
+            if (podeLigar(ctx)) return trocar(ctx, ligada = false)
+            atual?.let {
+                Log.i(TAG, "Vigia do desligar: o alarme acabou, se desliga")
+                it.disableSelf()
+            }
+        }
+
+        /**
+         * Qual atalho de acessibilidade do celular liga e desliga a vigia, se algum: os botões de volume (segurar os dois
+         * por 3 s) ou o botão de acessibilidade. Null sem atalho (ou se o Android não deixar ler).
+         */
+        fun atalho(ctx: Context): AtalhoDaVigia? {
+            fun tem(chave: String) = runCatching { Settings.Secure.getString(ctx.contentResolver, chave) }.getOrNull()
+                .orEmpty().split(':').any { it == nome(ctx) || it == nomeCurto(ctx) }
+            return when {
+                tem("accessibility_shortcut_target_service") -> AtalhoDaVigia.VOLUME
+                tem("accessibility_button_targets") -> AtalhoDaVigia.BOTAO
+                else -> null
+            }
+        }
 
         private fun trocar(ctx: Context, ligada: Boolean) {
             if (!podeLigar(ctx)) return
@@ -72,10 +101,14 @@ class VigiaDoDesligar : AccessibilityService() {
         /** Quantos nós da janela olhar, no máximo, procurando os textos do menu. */
         private const val NOS_MAX = 150
 
-        /** Ligada agora (pro [TesteDaVigia] saber se o Android ligou de fato). */
+        private val _noAr = MutableStateFlow(false)
+
+        /** Ligada agora: a tela do alarme mostra o cadeado, e o [TesteDaVigia] sabe se o Android ligou de fato. */
+        val noAr: StateFlow<Boolean> = _noAr
+
+        /** O serviço no ar (pra ele se desligar no fim do alarme, sem a permissão); null desligado. */
         @Volatile
-        var conectada = false
-            private set
+        private var atual: VigiaDoDesligar? = null
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -84,7 +117,8 @@ class VigiaDoDesligar : AccessibilityService() {
     private val sobrou = Runnable { soltarSeSobrou() }
 
     override fun onServiceConnected() {
-        conectada = true
+        atual = this
+        _noAr.value = true
         conectadaEm = SystemClock.elapsedRealtime()
         Log.i(TAG, "Vigia do desligar: no ar (${if (AlarmeService.tocando.value != null) "com" else "sem"} alarme tocando)")
         handler.postDelayed(sobrou, SOBRA_MS)
@@ -130,7 +164,8 @@ class VigiaDoDesligar : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        conectada = false
+        if (atual === this) atual = null
+        _noAr.value = false
         handler.removeCallbacks(sobrou)
         return super.onUnbind(intent)
     }
