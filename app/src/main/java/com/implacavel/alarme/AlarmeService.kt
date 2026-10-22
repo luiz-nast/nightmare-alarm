@@ -649,6 +649,7 @@ class AlarmeService : Service() {
         _caminhada.value = null
         _miniTarefa.value = null
         _tocando.value = null
+        VigiaDoDesligar.desligar(this)
         _comCaminhada.value = false
         if (processador.isHeld) processador.release()
         // Um instante pras últimas linhas chegarem no arquivo
@@ -678,6 +679,7 @@ class AlarmeService : Service() {
         if (!jaTocava) esquecerManha()
         _tocando.value = alarme
         _temposDoAlarme.value = em.tempos
+        VigiaDoDesligar.ligar(this) // só enquanto o alarme toca: o dia inteiro, os bancos estranham (veja VigiaDoDesligar.kt)
         mostrarNotificacao(alarme)
         sirene.preparar(em, comeco = !jaTocava)
         // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está.
