@@ -35,12 +35,6 @@ import kotlinx.coroutines.flow.StateFlow
 class VigiaDoDesligar : AccessibilityService() {
 
     companion object {
-        /** O serviço está na lista dos ligados nas Configurações de acessibilidade do celular. */
-        fun ligado(ctx: Context): Boolean {
-            val ligados = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
-            return ligados.split(':').any { it == nome(ctx) || it == nomeCurto(ctx) }
-        }
-
         /** O app pode ligar e desligar a vigia sozinho: tem a WRITE_SECURE_SETTINGS (dada pelo cabo, uma vez). */
         fun podeLigar(ctx: Context): Boolean =
             ctx.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
