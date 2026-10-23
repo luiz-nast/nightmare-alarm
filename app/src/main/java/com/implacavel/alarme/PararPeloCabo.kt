@@ -14,7 +14,7 @@ class PararPeloCabo : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val em = Ajustes.emAndamento
         Log.w(TAG, "Pelo cabo: encerrando o alarme em andamento (${em?.alarme?.id ?: "nenhum"})")
-        if (AlarmeService.tocando.value != null) return AlarmeService.missaoCumprida(ctx)
+        if (AlarmeService.tocando.value != null) return AlarmeService.encerrarSemMissao(ctx)
         // O serviço não está tocando (o app acabou de voltar, a retomada ainda não disparou): apaga tudo daqui
         Ajustes.emAndamento = null
         Ajustes.progresso = null

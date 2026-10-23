@@ -3,7 +3,7 @@
 // deixa um serviço de acessibilidade ver as janelas e apertar "voltar" por ele. Segurar o botão por uns 7 s reinicia o
 // celular à força, por hardware: isso ninguém segura, mas o alarme volta depois do reinício (BootReceiver).
 //
-// Ligada SÓ enquanto um alarme toca ([ligar] no começo, [desligar] no fim), pelo próprio app: um app de fora da Play
+// Ligada SÓ enquanto um alarme toca ([ligar] no começo e a cada renovação do alarme, [desligar] no fim), pelo app: um app de fora da Play
 // Store com acessibilidade ligada o dia inteiro é o retrato do "golpe da mão fantasma", e os bancos (o Nubank, pelo
 // "App access risk" do Android) avisam ou travam. O Android não deixa app nenhum ligar a própria acessibilidade: pra
 // ligar e desligar sozinho, o app precisa da permissão WRITE_SECURE_SETTINGS, dada uma vez pelo cabo (o dono roda o

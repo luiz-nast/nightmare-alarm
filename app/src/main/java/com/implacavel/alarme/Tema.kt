@@ -1,4 +1,4 @@
-// Compartilhado pelas telas: tema (sempre claro), cores fixas da tela do alarme, o relógio agoraACada e lidoAoVoltar.
+// Compartilhado pelas telas: temas (Claro no alarme, Noite na tela principal), cores fixas da tela do alarme, o relógio agoraACada e lidoAoVoltar.
 package com.implacavel.alarme
 
 import androidx.compose.material3.MaterialTheme

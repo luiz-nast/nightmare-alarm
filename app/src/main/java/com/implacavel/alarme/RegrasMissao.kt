@@ -2,7 +2,6 @@
 package com.implacavel.alarme
 
 import java.net.URI
-import java.text.Normalizer
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
@@ -38,8 +37,7 @@ fun verificacaoEm(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (al
 
 /** Aceita "stop" e jeitos de falar ou transcrever com sotaque ("estop", "istópi", "stopi"). */
 fun disseStop(texto: String): Boolean {
-    val semAcento = Normalizer.normalize(texto.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
-    return Regex("\\b[ei]?stop").containsMatchIn(semAcento)
+    return Regex("\\b[ei]?stop").containsMatchIn(semAcento(texto))
 }
 
 /**
@@ -177,8 +175,7 @@ private fun acertos(alvo: List<String>, ouviu: String): List<Boolean> {
 }
 
 private fun palavras(texto: String): List<String> =
-    Normalizer.normalize(texto.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
-        .replace("’", "'").replace("i'm", "i am").replace("n't", " not").replace("'re", " are").replace("'ll", " will")
+    semAcento(texto).replace("i'm", "i am").replace("n't", " not").replace("'re", " are").replace("'ll", " will")
         .replace("'ve", " have").replace("it's", "it is").replace("'", "")
         .split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
 

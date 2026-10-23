@@ -5,7 +5,6 @@
 // manhã. Funções puras, testadas em ConversaTest. Quem decide tudo pelos relógios é o AlarmeService: a IA só produz texto.
 package com.implacavel.alarme
 
-import java.text.Normalizer
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -166,9 +165,6 @@ const val TIQUE_CONVERSA_MS = 250L
  * na internet no meio ([BUSCA_MAX_MS]) e a segunda resposta.
  */
 const val RESPOSTA_IA_MAX_MS = 20_000L
-
-/** Falha passageira da IA (internet, servidor cheio): espera isso e tenta mais uma vez. */
-const val PAUSA_NOVA_TENTATIVA_MS = 1_500L
 
 /** Vezes seguidas sem resposta da IA: a conversa acaba antes e a manhã segue pra próxima etapa. */
 const val FALHAS_DA_IA_ATE_DESISTIR = 3
@@ -520,6 +516,3 @@ fun instrucaoDoTreinador(noticias: List<String>, metas: String, hora: LocalTime,
     }
 }
 
-/** Minúsculas, sem acento ("não" vira "nao") e com o apóstrofo comum, pra comparar fala. */
-private fun semAcento(texto: String): String =
-    Normalizer.normalize(texto.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").replace("’", "'")

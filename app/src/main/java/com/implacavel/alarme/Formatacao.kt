@@ -1,6 +1,7 @@
 // Textos de hora, dias e tempo que falta mostrados na tela. Funções puras, testadas em FormatacaoTest.
 package com.implacavel.alarme
 
+import java.text.Normalizer
 import java.time.Duration
 import java.time.LocalTime
 import java.time.ZonedDateTime
@@ -49,3 +50,7 @@ fun tempoRestante(ms: Long): String {
 
 /** Uma fração (0,3) em porcentagem inteira pra tela (30). */
 fun porcento(fracao: Float): Int = (fracao * 100).roundToInt()
+
+/** Minúsculas, sem acento ("não" vira "nao") e com o apóstrofo comum, pra comparar fala (o "stop", as frases, a conversa). */
+fun semAcento(texto: String): String =
+    Normalizer.normalize(texto.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").replace("’", "'")

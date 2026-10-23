@@ -38,12 +38,12 @@ import java.time.LocalTime
  *   volta e a tela reabre; o anel da câmera fica onde estava;
  * - depois do "stop", a voz do celular dá bom dia, [PAUSA_DEPOIS_DA_SAUDACAO_MS] depois diz "Activity
  *   starting now", toca o bipe positivo e começa a câmera; a cada 10 min completos, a voz avisa;
- * - na metade, o anel para e vem a verificação: a voz fala 5 frases ([frasesDoDia]) e a pessoa repete
+ * - na metade, o anel para e vem a verificação: a voz fala as [Tempos.frases] frases do dia (0 a 10) e a pessoa repete
  *   cada uma; sem responder por [SILENCIO_APITO_MS], um apito alto, e em [SILENCIO_ZERA_MS] o anel zera e a
  *   música volta. Depois dela, a câmera fica mais exigente com os olhos;
  *   daí a música só fica calada enquanto o relógio da câmera ([tiqueDaCamera]) vê a pessoa
  *   olhando; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
- *   volume máximo do celular; no teste, 40%), e em [DESISTENCIA_MS] religa a música (o anel zera);
+ *   volume máximo do celular; no teste, no máximo [Sirene.VOLUME_DO_BIPE_DE_TESTE]), e em [DESISTENCIA_MS] religa a música (o anel zera);
  * - a cada [RENOVAR_MS], empurra pra frente a retomada no AlarmManager: se o app cair, travar ou
  *   for encerrado, ou se o celular desligar, o alarme volta sozinho;
  * - se o app caiu [LIMITE_QUEDAS] vezes neste alarme, é defeito, não truque: ele volta com o
@@ -53,7 +53,7 @@ import java.time.LocalTime
  *   ([MotorDaConversa], no celular) e a caminhada pelo GPS, chova ou faça sol, com ou sem internet (sem a IA,
  *   direto pra caminhada). Quem decide tudo são os relógios daqui: a IA só produz o texto das falas.
  *
- * Comandos pela action do Intent, cada um com uma função no companion: tocar, missão cumprida (defeito ou cabo),
+ * Comandos pela action do Intent, cada um com uma função no companion: tocar, encerrar sem missão (defeito ou cabo),
  * desligar, reexibir, tela, silenciar, volume, dar tempo, ondas, fase e cancelar teste. Na
  * conversa, quem ouve é a [Escuta], daqui mesmo; na caminhada, o GPS e os passos ([SentidosDaCaminhada]) e o relógio
  * deles ([ContadorDaCaminhada]) também são daqui: a conversa e a caminhada seguem com a tela fechada.
@@ -102,7 +102,7 @@ class AlarmeService : Service() {
 
     companion object {
         private const val ACAO_TOCAR = "tocar"
-        private const val ACAO_CONCLUIR = "concluir"
+        private const val ACAO_ENCERRAR_SEM_MISSAO = "encerrar_sem_missao"
         private const val ACAO_DESLIGAR = "desligar"
         private const val ACAO_REEXIBIR = "reexibir"
         private const val ACAO_TELA = "tela"
@@ -310,7 +310,7 @@ class AlarmeService : Service() {
          * Defeito da câmera, ou a saída de emergência pelo cabo: fim do alarme, sem comemoração. O anel completo e a
          * caminhada completa terminam aqui dentro mesmo ([concluir]), sem passar por este comando.
          */
-        fun missaoCumprida(ctx: Context) { ctx.startService(comando(ctx, ACAO_CONCLUIR)) }
+        fun encerrarSemMissao(ctx: Context) { ctx.startService(comando(ctx, ACAO_ENCERRAR_SEM_MISSAO)) }
 
         /** Botão DESLIGAR. Só vale pra alarme sem missão (ou liberado por defeito). */
         fun desligar(ctx: Context) { ctx.startService(comando(ctx, ACAO_DESLIGAR)) }
@@ -421,12 +421,14 @@ class AlarmeService : Service() {
     }
 
     /**
-     * Enquanto toca: empurra a retomada pra frente (se o app morrer, ela dispara e o alarme volta) e
-     * mantém o processador acordado (quem acende a tela é a AlarmeActivity).
+     * Enquanto toca: empurra a retomada pra frente (se o app morrer, ela dispara e o alarme volta),
+     * mantém o processador acordado (quem acende a tela é a AlarmeActivity) e põe a vigia do desligar de volta na
+     * lista, se alguém a tirou à mão nas Configurações.
      */
     private val renovar = object : Runnable {
         override fun run() {
             Agendador.agendarRetomada(this@AlarmeService)
+            VigiaDoDesligar.ligar(this@AlarmeService) // já ligada: só lê a lista, não escreve nada
             processador.acquire(RENOVAR_MS * 12)
             salvarProgresso()
             atualizarNotificacao()
@@ -595,13 +597,13 @@ class AlarmeService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val acao = intent?.action
-        if (acao in setOf(ACAO_TOCAR, ACAO_CONCLUIR, ACAO_DESLIGAR, ACAO_SILENCIAR, ACAO_DAR_TEMPO)) Log.i(TAG, "Serviço: comando $acao")
+        if (acao in setOf(ACAO_TOCAR, ACAO_ENCERRAR_SEM_MISSAO, ACAO_DESLIGAR, ACAO_SILENCIAR, ACAO_DAR_TEMPO)) Log.i(TAG, "Serviço: comando $acao")
         val alarme = _tocando.value
         when {
             acao == ACAO_TOCAR -> iniciar()
             // Comando atrasado, de quando o alarme já tinha parado: só fecha o serviço
             alarme == null -> pararServico()
-            acao == ACAO_CONCLUIR -> concluir(comemorar = false)
+            acao == ACAO_ENCERRAR_SEM_MISSAO -> concluir(comemorar = false)
             // Nem repetindo o DESLIGAR de outro alarme (a notificação sempre traz o mesmo) dá pra fugir da missão
             acao == ACAO_DESLIGAR -> if (!alarme.missao) concluir()
             // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme durar
@@ -740,18 +742,16 @@ class AlarmeService : Service() {
      * O app saiu sozinho desde [desde]: as quedas de [quedasDesde] ou o Android matando por falta de memória (o
      * modelo da IA usa uns 1,5 GB). Do Android 11 em diante.
      */
-    private fun saiuSozinhoDesde(desde: Long): Boolean {
-        if (Build.VERSION.SDK_INT < 30) return false
-        val motivos = setOf(ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_ANR, ApplicationExitInfo.REASON_LOW_MEMORY)
-        return getSystemService(ActivityManager::class.java)
-            .getHistoricalProcessExitReasons(packageName, 0, 0)
-            .any { it.timestamp > desde && it.reason in motivos }
-    }
+    private fun saiuSozinhoDesde(desde: Long): Boolean = saidasDesde(desde, faltaDeMemoria = true) > 0
 
     /** Quedas do app (erro, erro nativo ou travamento) desde [desde]. O Android só conta isso do 11 em diante. */
-    private fun quedasDesde(desde: Long): Int {
+    private fun quedasDesde(desde: Long): Int = saidasDesde(desde, faltaDeMemoria = false)
+
+    /** Saídas do app desde [desde] por queda (erro, erro nativo, travamento) e, com [faltaDeMemoria], também por ela. */
+    private fun saidasDesde(desde: Long, faltaDeMemoria: Boolean): Int {
         if (Build.VERSION.SDK_INT < 30) return 0
-        val motivos = setOf(ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_ANR)
+        val quedas = setOf(ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_ANR)
+        val motivos = if (faltaDeMemoria) quedas + ApplicationExitInfo.REASON_LOW_MEMORY else quedas
         return getSystemService(ActivityManager::class.java)
             .getHistoricalProcessExitReasons(packageName, 0, 0)
             .count { it.timestamp > desde && it.reason in motivos }
@@ -1112,8 +1112,9 @@ class AlarmeService : Service() {
     }
 
     // ---------------------------------------------------------------------------------------------------------
-    // Despertador "conversa + caminhada": depois do bom dia, a conversa com a IA (10 min de conversa pura) e a
-    // caminhada (4 min pra sair e 16 min andando), chova ou faça sol. Tudo pelos relógios daqui: a IA só produz o
+    // Despertador "conversa + caminhada": depois do bom dia, a conversa com a IA ([Tempos.conversaMin] de conversa
+    // pura, 10 por padrão) e a caminhada ([Tempos.prepararMin] pra sair e [Tempos.caminhadaMin] andando: 4 e 10 por
+    // padrão), chova ou faça sol. Tudo pelos relógios daqui: a IA só produz o
     // texto das falas e nunca encurta, pausa ou acaba nada.
 
     /** O [alarme] é o despertador "conversa + caminhada" (só vale com missão). */
