@@ -39,7 +39,7 @@ const val PRAZO_SAIR_TESTE_MS = 30_000L
  * repetida, o prazo ganha mais isto (com as ondas de novo). Se ele andou depois desse bipe, a oferta some e não
  * volta: ele já acordou. No teste, [PREPARO_EXTRA_TESTE_MS].
  */
-const val PREPARO_EXTRA_MS = 3 * 60_000L
+const val PREPARO_EXTRA_MS = 5 * 60_000L // o dono, 10-28: eram 3
 
 const val PREPARO_EXTRA_TESTE_MS = 30_000L
 

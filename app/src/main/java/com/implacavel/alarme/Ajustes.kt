@@ -104,6 +104,20 @@ object Ajustes {
         _sobreMim.value = valor
     }
 
+    private val _palavras = MutableStateFlow("")
+
+    /**
+     * As palavras que o dono usa e o reconhecedor de voz erra (Settings › "Your words": nomes, termos do trabalho), em
+     * texto, separadas por vírgula. Vão pro reconhecedor (que tende a elas) e pra IA (que sabe que podem vir trocadas).
+     */
+    val palavras: StateFlow<String> = _palavras.asStateFlow()
+
+    fun escreverPalavras(texto: String) {
+        val valor = texto.take(PALAVRAS_MAX_LETRAS)
+        prefs.edit { putString("palavras", valor) }
+        _palavras.value = valor
+    }
+
     private val _memoriaDaIa = MutableStateFlow("")
     private val _memoriaEm = MutableStateFlow(0L)
 
@@ -148,6 +162,7 @@ object Ajustes {
             caminhadaMin = prefs.getInt("caminhadaMin", p.caminhadaMin),
         ).ajustado()
         _sobreMim.value = prefs.getString("sobreMim", "").orEmpty().take(SOBRE_MIM_MAX_LETRAS)
+        _palavras.value = prefs.getString("palavras", "").orEmpty().take(PALAVRAS_MAX_LETRAS)
         _memoriaDaIa.value = limparAnotacoes(prefs.getString("memoriaDaIa", "").orEmpty())
         _memoriaEm.value = prefs.getLong("memoriaEm", 0L)
     }

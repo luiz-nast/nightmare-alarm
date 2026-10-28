@@ -74,6 +74,7 @@ private fun TelaPrincipal() {
     val volumeDaVoz by Ajustes.volumeDaVozAgora.collectAsStateWithLifecycle()
     val tempos by Ajustes.tempos.collectAsStateWithLifecycle()
     val sobreMim by Ajustes.sobreMim.collectAsStateWithLifecycle()
+    val palavras by Ajustes.palavras.collectAsStateWithLifecycle()
     val memoriaDaIa by Ajustes.memoriaDaIa.collectAsStateWithLifecycle()
     val memoriaEm by Ajustes.memoriaEm.collectAsStateWithLifecycle()
     lidoAoVoltar { Sons.reler() } // um som pode ter chegado pelo cabo
@@ -197,7 +198,7 @@ private fun TelaPrincipal() {
                             )
                         }
                         item { SecaoAjustes(volumeDaVoz, Ajustes::escolherVolumeDaVoz, tempos, Ajustes::escolherTempos) }
-                        item { SecaoIa(sobreMim, Ajustes::escreverSobreMim, memoriaDaIa, memoriaEm, onEsquecer = { Ajustes.guardarMemoriaDaIa("") }) }
+                        item { SecaoIa(sobreMim, Ajustes::escreverSobreMim, palavras, Ajustes::escreverPalavras, memoriaDaIa, memoriaEm, onEsquecer = { Ajustes.guardarMemoriaDaIa("") }) }
                     }
                 }
             }

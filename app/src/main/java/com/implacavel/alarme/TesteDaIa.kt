@@ -55,7 +55,7 @@ private val FALAS_DE_TESTE = listOf(
     pedidoDeAbertura(MANCHETES_DE_TESTE, MEMORIA_DE_TESTE),
     "Yes! I bought the Arduino kit yesterday, but I don't know where to start.",
     "Who invented the transistor?",
-    "Yeah.",
+    "Hmm, I don't know, whatever.", // enrolou: a IA tem que julgar [VAGUE] e perguntar de novo
     "Can I sleep five more minutes?",
 )
 
@@ -126,7 +126,8 @@ class TesteDaIa : BroadcastReceiver() {
                         Log.i(TAG, "IA teste: a IA pediu busca: \"$consulta\" (${SystemClock.elapsedRealtime() - antes} ms depois da fala)")
                     }
                     val b = conversa.getBenchmarkInfo()
-                    val limpa = limparFala(troca.fala)
+                    val (veredito, corpo) = vereditoDaFala(troca.fala)
+                    val limpa = limparFala(corpo)
                     transcricao += Turno(daIa = true, texto = limpa)
                     Log.i(
                         TAG,
@@ -135,7 +136,7 @@ class TesteDaIa : BroadcastReceiver() {
                             "escreveu ${b.lastDecodeTokenCount} a ${"%.1f".format(b.lastDecodeTokensPerSecond)}/s, ${conversa.getTokenCount()} tokens na conversa, " +
                             "${limpa.split(" ").size} palavras, segura=${respostaSegura(limpa)})",
                     )
-                    Log.i(TAG, "IA teste: \"${limpa.take(400)}\"")
+                    Log.i(TAG, "IA teste: [${veredito.name}] \"${limpa.take(400)}\"")
                 }
                 Log.i(TAG, "IA teste: memória do app depois da conversa ${memoriaDoAppMb(ctx)} MB")
             }

@@ -87,7 +87,7 @@ const val FALA_PROCURAR = "Good question, sir. Let me check that."
  * O que a pessoa disse não fez sentido (ruído, português, o reconhecedor errou feio): a IA responde isto, e não um
  * palpite ([naoEntendeu]). Gravada fixa, pra sair na hora.
  */
-const val FALA_NAO_ENTENDI = "I did not get that, sir. Say it again, in English."
+const val FALA_NAO_ENTENDI = "I did not get that, sir. Say it again."
 
 /**
  * O sintetizador de voz do celular, em inglês, com uma voz instalada no celular ([vozSemInternet]): grava igual

@@ -449,7 +449,7 @@ class CaminhadaTest {
 
     @Test
     fun miniTarefaDoPrazoUmaVezSoNoPrimeiroBipe() {
-        assertEquals(3 * 60_000L, preparoExtra(Alarme(1, 7, 0, caminhada = true)))
+        assertEquals(5 * 60_000L, preparoExtra(Alarme(1, 7, 0, caminhada = true))) // eram 3 até 10-28
         assertEquals(30_000L, preparoExtra(Alarme.teste(caminhada = true)))
         // Só no 1º bipe de parado depois do prazo, se o extra não foi usado e ela não foi retirada
         assertTrue(ofereceMiniTarefa(bipe = 1, usado = false, retirada = false))
@@ -467,9 +467,9 @@ class CaminhadaTest {
     fun caminhadaEPrazoSeguemOsAjustesETeste3Minutos() {
         val alarme = Alarme(1, 7, 0, caminhada = true)
         val teste = Alarme.teste(caminhada = true)
-        // De começo: 10 min andando (era 16: o dono pediu 10 em 10-18) e 4 pra sair
+        // De começo: 10 min andando (era 16: o dono pediu 10 em 10-18) e 5 pra sair (eram 4: o dono pediu 5 em 10-28)
         assertEquals(10 * 60_000L, metaCaminhada(alarme))
-        assertEquals(4 * 60_000L, prazoSair(alarme))
+        assertEquals(5 * 60_000L, prazoSair(alarme))
         // O dono mexeu: 30 min andando, sem prazo (os bipes de parado contam já)
         val tempos = Tempos(caminhadaMin = 30, prepararMin = 0)
         assertEquals(30 * 60_000L, metaCaminhada(alarme, tempos))

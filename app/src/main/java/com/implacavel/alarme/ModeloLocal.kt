@@ -48,7 +48,7 @@ const val CONTEXTO_TOKENS = 4096
  * [ateAUltimaFrase] tira a frase pela metade. No S24 FE o modelo escreve uns 17 a 19 tokens por segundo: uma fala cheia
  * leva uns 3 s pra nascer (e uns 11 s pra voz dizer). Era 84 (40 palavras): o dono achou que falava demais.
  */
-const val RESPOSTA_MAX_TOKENS = 64
+const val RESPOSTA_MAX_TOKENS = 72 // 10-28: +8 pro juízo ("[VAGUE]") e a resposta da busca, que agora conclui
 
 /** A amostragem do Gemma 4 (a recomendada pelo Google, com a temperatura um pouco abaixo de 1: varia as falas sem perder o fio). */
 private val AMOSTRAGEM = SamplerConfig(topK = 64, topP = 0.95, temperature = 0.9)
@@ -305,10 +305,12 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val abert
     private fun entregar(numero: Int, resposta: String?, demora: Long, aoResponder: (String?) -> Unit) {
         if (numero != pedidos || desligado) return // cancelado, ou já tem um pedido mais novo
         entregue = numero
-        val limpa = resposta?.let(::limparFala)?.ifEmpty { null }
+        // O juízo ([vereditoDaFala]) sai antes da limpeza, que apagaria os colchetes, e volta na frente pro serviço
+        val (veredito, corpo) = resposta?.let(::vereditoDaFala) ?: (Veredito.BOM to "")
+        val limpa = limparFala(corpo).ifEmpty { null }
         val segura = limpa == null || respostaSegura(limpa)
         if (!segura) Log.i(TAG, "Conversa: a IA sugeriu descansar ou parar, vai a frase fixa no lugar")
-        val texto = if (segura) limpa else falaNaoNegocia
+        val texto = if (segura) limpa?.let { comVeredito(veredito, it) } else falaNaoNegocia
         Log.i(TAG, "Conversa: ${if (texto != null) "IA respondeu (${texto.length} letras)" else "IA sem resposta"} em $demora ms")
         aoResponder(texto)
     }

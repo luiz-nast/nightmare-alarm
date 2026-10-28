@@ -403,7 +403,9 @@ class AlarmeService : Service() {
     private var tiposDoServico = 0 // os tipos do serviço que o Android deu ([mostrarNotificacao])
     private var tiposPedidos = 0 // os do último pedido ao Android, e quando foi ([atualizarTipos]: o mesmo pedido, recusado, espera)
     private var tiposPedidosEm = 0L
-    private var naoEntendidos = 0 // falas seguidas da pessoa que a IA não entendeu (ruído, português)
+    private var naoEntendidos = 0 // falas seguidas da pessoa que a IA não entendeu (ruído, algo que não deu pra entender)
+    private var respostasVagas = 0 // respostas enroladas dele seguidas ([Veredito.VAGO]), até o bipe ([VAGAS_ATE_O_BIPE])
+    private var bipeAntesDe: String? = null // a fala da IA que toca depois do bipe do juízo, quando tocar de verdade
     private var ultimaFalaEntendida = "" // a última fala de verdade da IA: a que ela repete depois do bipe do não entendi
     private var preparoExtraUsado = false // a mini tarefa do prazo já deu o extra desta manhã
     private var miniTarefaRetirada = false // ele andou depois do primeiro bipe: a mini tarefa não aparece mais
@@ -1170,7 +1172,7 @@ class AlarmeService : Service() {
      */
     private fun criarMotor(manchetes: List<String>, metas: String): MotorDaConversa? {
         val memoria = Ajustes.memoriaDaIaValida() // só a última conversa, e só por um dia
-        val instrucao = instrucaoDoTreinador(manchetes, metas, LocalTime.now(), Ajustes.sobreMim.value, memoria)
+        val instrucao = instrucaoDoTreinador(manchetes, metas, LocalTime.now(), Ajustes.sobreMim.value, memoria, listaDePalavras(Ajustes.palavras.value))
         val ia = MotorDaConversa.criar(this, instrucao, pedidoDeAbertura(manchetes, memoria), FALA_NAO_NEGOCIA) ?: return null
         // O mesmo motor segue depois de a música voltar (a rodada muda): basta a conversa estar esperando a IA
         ia.aoProcurar = { consulta ->
@@ -1271,15 +1273,18 @@ class AlarmeService : Service() {
             onSom = { comecou, db -> if (rodada == rodadaConversa) somNaConversa(comecou, db) },
             onTexto = { if (rodada == rodadaConversa) textoNaConversa(it) },
             onIndisponivel = { if (rodada == rodadaConversa) terminarConversa("sem reconhecimento de voz") },
+            palavras = listaDePalavras(Ajustes.palavras.value),
         ).also { if (!it.comecar()) return }
         ultimoTique = SystemClock.elapsedRealtime()
         handler.removeCallbacks(tiqueDaConversa)
         handler.postDelayed(tiqueDaConversa, TIQUE_CONVERSA_MS)
         if (primeira != null) {
+            val abertura = vereditoDaFala(primeira).second // a abertura não julga ninguém
             // No 3º "não entendi" seguido, é ela que volta (a pergunta de abertura), e não outro "não entendi"
-            ultimaFalaEntendida = primeira
+            ultimaFalaEntendida = abertura
             naoEntendidos = 0
-            return falarDaIa(primeira)
+            respostasVagas = 0
+            return falarDaIa(abertura)
         }
         val ia = motor ?: return terminarConversa("sem a IA")
         pedirAIa { ia.retomar(it) }
@@ -1354,10 +1359,17 @@ class AlarmeService : Service() {
     private fun iaRespondeu(fala: String?) {
         if (fala != null) {
             falhas = 0
-            if (naoEntendeu(fala)) return naoEntendido()
+            val (veredito, corpo) = vereditoDaFala(fala)
+            if (naoEntendeu(corpo)) return naoEntendido()
             naoEntendidos = 0
-            ultimaFalaEntendida = fala
-            return falarDaIa(fala)
+            ultimaFalaEntendida = corpo
+            // O juízo da IA sobre a resposta dele ([bipeDoJuizo]): enrolou duas vezes seguidas, ou respondeu algo péssimo,
+            // e a fala dela (já com o xingamento) vem depois de um bipe leve pra médio, quando ela for tocar de verdade
+            val (bipa, vagas) = bipeDoJuizo(veredito, respostasVagas)
+            respostasVagas = vagas
+            if (veredito != Veredito.BOM) Log.i(TAG, "Conversa: a IA julgou a resposta dele ${veredito.name.lowercase()}${if (bipa) ", com bipe" else ""}")
+            bipeAntesDe = if (bipa) corpo else null
+            return falarDaIa(corpo)
         }
         falhas++
         val esperou = SystemClock.elapsedRealtime() - esperaDesde
@@ -1434,18 +1446,30 @@ class AlarmeService : Service() {
         v.gravar("ia_${++falasDaIa}", texto, pronta)
     }
 
-    /** Daqui em diante a vez é da IA: a voz vai até o fim, e depois é a vez da pessoa. */
+    /**
+     * Daqui em diante a vez é da IA: a voz vai até o fim, e depois é a vez da pessoa. Se o juízo pediu bipe pra esta fala
+     * ([bipeAntesDe]), ele toca antes: só aqui, porque uma resposta jogada fora antes de tocar não bipa ninguém.
+     */
     private fun tocarFalaDaIa(texto: String, arquivo: File?) {
         val rodada = rodadaConversa
         provisoria = null
+        val bipar = texto == bipeAntesDe
+        bipeAntesDe = null
         if (texto != FALA_NAO_ENTENDI) transcricao += Turno(daIa = true, texto = texto)
         _conversa.value = _conversa.value?.copy(falaDaIa = texto, suaVez = false, pensando = false, procurando = "")
         iaFalando = arquivo != null
-        falarNaConversa(arquivo) {
-            if (rodada != rodadaConversa) return@falarNaConversa
-            iaFalando = false
-            suaVezNaConversa()
+        val falar = {
+            falarNaConversa(arquivo) {
+                if (rodada == rodadaConversa) {
+                    iaFalando = false
+                    suaVezNaConversa()
+                }
+            }
         }
+        if (!bipar) return falar()
+        val bipe = sirene.bipe(BIPE_DO_JUIZO)
+        escuta?.surdoPor(bipe + ATRASO_DO_BIPE_MS)
+        handler.postDelayed({ if (rodada == rodadaConversa) falar() }, bipe + ATRASO_DO_BIPE_MS)
     }
 
     /** Uma fala da voz na conversa: enquanto ela toca, a [escuta] não ouve (o eco da voz não é a pessoa). */
@@ -1533,6 +1557,7 @@ class AlarmeService : Service() {
         pedidosDaIa++ // a resposta e o prazo dela não chegam mais
         vezDaIa++ // a voz, se já estiver gravando, não toca
         falhas = 0 // uma nova tentativa que estava pra sair não conta contra a próxima resposta
+        bipeAntesDe = null // o bipe do juízo era pra esta resposta, que não toca mais
         if (p.chegou) motor?.descartar() else motor?.cancelar()
         _conversa.value = _conversa.value?.copy(suaVez = true, pensando = false)
     }
@@ -2008,6 +2033,8 @@ class AlarmeService : Service() {
         prazoAte = 0
         transcricao.clear()
         naoEntendidos = 0
+        respostasVagas = 0
+        bipeAntesDe = null
         ultimaFalaEntendida = ""
         preparoExtraUsado = false
         miniTarefaRetirada = false

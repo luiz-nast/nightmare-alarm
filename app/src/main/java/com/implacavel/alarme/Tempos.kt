@@ -21,7 +21,7 @@ data class Tempos(
     val frases: Int = 5,
     val cameraDificilMin: Int = 20,
     val conversaMin: Int = 10,
-    val prepararMin: Int = 4,
+    val prepararMin: Int = 5, // o dono, 10-28: 4 era pouco
     val caminhadaMin: Int = 10,
 ) {
     /** A subida da música do alarme com este volume (o remédio tem a dele, [SUBIDA_REMEDIO]). */

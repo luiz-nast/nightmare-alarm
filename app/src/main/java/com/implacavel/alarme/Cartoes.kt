@@ -251,18 +251,33 @@ private fun AjusteDeInteiro(titulo: String, valor: Int, faixa: IntRange, unidade
 
 /**
  * A IA da manhã, recolhida: o que o dono conta de si ([sobreMim], gravado enquanto digita, até
- * [SOBRE_MIM_MAX_LETRAS]) e o que a IA anotou dele na última conversa ([memoria], escrita em [memoriaEm]; com o
+ * [SOBRE_MIM_MAX_LETRAS]), as palavras dele que o reconhecedor erra ([palavras]) e o que a IA anotou dele na última conversa ([memoria], escrita em [memoriaEm]; com o
  * botão de esquecer). Os dois vão na instrução da IA de manhã (as notas, só enquanto valem: [memoriaVale]): é o que
  * faz a conversa continuar de onde parou, em vez de recomeçar do zero, sem virar uma pilha de dias.
  */
 @Composable
-fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, memoriaEm: Long, onEsquecer: () -> Unit) {
+fun SecaoIa(
+    sobreMim: String,
+    onSobreMim: (String) -> Unit,
+    palavras: String,
+    onPalavras: (String) -> Unit,
+    memoria: String,
+    memoriaEm: Long,
+    onEsquecer: () -> Unit,
+) {
     var texto by remember(sobreMim) { mutableStateOf(sobreMim) }
+    var suas by remember(palavras) { mutableStateOf(palavras) }
     // Grava um instante depois da última letra, não a cada tecla
     LaunchedEffect(texto) {
         if (texto != sobreMim) {
             delay(800)
             onSobreMim(texto)
+        }
+    }
+    LaunchedEffect(suas) {
+        if (suas != palavras) {
+            delay(800)
+            onPalavras(suas)
         }
     }
     val linhas = memoria.lines().count { it.isNotBlank() }
@@ -288,6 +303,20 @@ fun SecaoIa(sobreMim: String, onSobreMim: (String) -> Unit, memoria: String, mem
             modifier = Modifier.fillMaxWidth(),
         )
         Text("${texto.length}/$SOBRE_MIM_MAX_LETRAS", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 2.dp))
+
+        TituloDoAjuste("Your words")
+        Text(
+            "Names and words you say that the voice recognition gets wrong, separated by commas. It listens for them, and the AI knows they may come out garbled.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        OutlinedTextField(
+            value = suas,
+            onValueChange = { suas = it.take(PALAVRAS_MAX_LETRAS) },
+            placeholder = { Text("Arduino, breadboard, Opala, Nubank…") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         TituloDoAjuste("What the AI remembers from the last talk")
         Text(

@@ -137,7 +137,7 @@ class ConversaTest {
         assertTrue(com.startsWith("[Search result for \"coffee price\":"))
         assertTrue(com.contains("He asked: \"Why is coffee so expensive?\". Now answer exactly that"))
         assertTrue(com.contains("Do not mention the search"))
-        assertTrue(com.length < RESULTADO_MAX_LETRAS + 400)
+        assertTrue(com.length < RESULTADO_MAX_LETRAS + 500)
         assertTrue(pedidoComResultado("coffee price", null).contains("Nothing was found"))
         assertTrue(pedidoComResultado("coffee price", "  ").contains("Nothing was found"))
         // A pergunta dele sem as linhas do app entre colchetes; sem pergunta, só "answer him"
@@ -146,8 +146,8 @@ class ConversaTest {
     }
 
     @Test
-    fun resultadoDaBuscaJuntaWikipediaENoticias() {
-        // O começo de cada artigo (pages) mais o trecho onde a busca bateu (search), em HTML
+    fun resultadoDaBuscaTrataOTextoAntesDaIa() {
+        // A resposta da Wikipédia: o trecho onde a busca bateu (search, em HTML) e o texto do artigo (pages)
         val json = """{"batchcomplete":true,"query":{
             "search":[{"ns":0,"title":"Transistor","pageid":1,"snippet":"The first working <span class=\"searchmatch\">transistor</span> was invented in 1947 by Bardeen &amp; Brattain"}],
             "pages":[
@@ -155,24 +155,64 @@ class ConversaTest {
             {"pageid":1,"ns":0,"title":"Transistor","index":1,"extract":"A transistor is a semiconductor device."},
             {"pageid":3,"ns":0,"title":"Empty","index":3,"extract":"  "}]}}"""
         assertEquals(
-            listOf("Transistor: …The first working transistor was invented in 1947 by Bardeen & Brattain… A transistor is a semiconductor device.", "Second: Second article. More."),
-            trechosDaWikipedia(json),
+            listOf("Transistor" to "The first working transistor was invented in 1947 by Bardeen & Brattain\nA transistor is a semiconductor device.", "Second" to "Second article.\nMore."),
+            paginasDaWikipedia(json),
         )
-        // Cada artigo até TRECHO_MAX_LETRAS
-        val longo = """{"query":{"pages":[{"title":"L","index":1,"extract":"${"x".repeat(1_000)}"}]}}"""
-        assertEquals(TRECHO_MAX_LETRAS + 3, trechosDaWikipedia(longo).single().length)
-        // Só o começo, quando o trecho é o próprio começo
-        val igual = """{"query":{"search":[{"title":"T","snippet":"A <b>transistor</b> is a semiconductor device."}],"pages":[{"title":"T","index":1,"extract":"A transistor is a semiconductor device."}]}}"""
-        assertEquals(listOf("T: A transistor is a semiconductor device."), trechosDaWikipedia(igual))
-        assertTrue(trechosDaWikipedia("{\"batchcomplete\":true}").isEmpty()) // nada achado: sem "query"
-        assertTrue(trechosDaWikipedia("<html>erro</html>").isEmpty())
+        assertTrue(paginasDaWikipedia("{\"batchcomplete\":true}").isEmpty()) // nada achado: sem "query"
+        assertTrue(paginasDaWikipedia("<html>erro</html>").isEmpty())
+        // As frases com as palavras da busca vão; a que tem a data passa na frente; as sem nenhuma palavra, não
+        val fontes = listOf(
+            "Transistor" to "A transistor is a semiconductor device used to amplify signals. Bell Labs is a research company in New Jersey. " +
+                "The transistor was invented in 1947 by John Bardeen, Walter Brattain and William Shockley.",
+            "Bell Labs" to "Bell Labs is famous for many inventions in physics and computing.",
+        )
+        val fatos = fatosRelevantes(fontes, "who invented the transistor")
+        assertEquals("Transistor: The transistor was invented in 1947 by John Bardeen, Walter Brattain and William Shockley.", fatos.first())
+        assertTrue(fatos.none { it.contains("New Jersey") })
+        assertTrue(fatosRelevantes(fontes, "who what when").isEmpty()) // só palavras vazias: nada a procurar
+        assertTrue(fatosRelevantes(fontes, "transistor", max = 1).size == 1)
         val texto = resultadoDaBusca(listOf("Transistor: A semiconductor device."), listOf("Chip makers rise - Reuters", "New transistor record - Nature"))
-        assertEquals("Transistor: A semiconductor device.\nRecent news:\n- Chip makers rise\n- New transistor record", texto)
+        assertEquals("Best facts found:\n- Transistor: A semiconductor device.\nRecent news:\n- Chip makers rise\n- New transistor record", texto)
         assertEquals("Recent news:\n- Only news", resultadoDaBusca(emptyList(), listOf("Only news - g1")))
         assertNull(resultadoDaBusca(emptyList(), emptyList()))
         assertEquals(RESULTADO_MAX_LETRAS, resultadoDaBusca(listOf("W: " + "x".repeat(3_000)), emptyList())!!.length)
         assertTrue(enderecoDaWikipedia("coffee price").contains("gsrsearch=coffee+price"))
+        assertTrue(enderecoDaWikipedia("cafe", "pt").startsWith("https://pt.wikipedia.org/"))
+        assertTrue(enderecoDaWikipedia("cafe", inteiro = true).contains("exlimit=1") && !enderecoDaWikipedia("cafe", inteiro = true).contains("exintro"))
         assertTrue(enderecoDasNoticias("coffee price").contains("q=coffee+price"))
+    }
+
+    @Test
+    fun juizoDaIaSobreARespostaDele() {
+        assertEquals(Veredito.BOM to "Start with a kit.", vereditoDaFala("[OK] Start with a kit."))
+        assertEquals(Veredito.VAGO to "Lazy answer, sir.", vereditoDaFala("[VAGUE] Lazy answer, sir."))
+        assertEquals(Veredito.PESSIMO to "Garbage, you dumbass.", vereditoDaFala("  [bad]: Garbage, you dumbass."))
+        assertEquals(Veredito.VAGO to "Come on.", vereditoDaFala("VAGUE: Come on."))
+        // Sem juízo, ou "OK" como palavra da fala: vale bom, e a fala fica inteira
+        assertEquals(Veredito.BOM to "OK, sir, here is one.", vereditoDaFala("OK, sir, here is one."))
+        assertEquals(Veredito.BOM to "Fine.", vereditoDaFala("Fine."))
+        // Do motor pro serviço o juízo vai na frente, e volta igual
+        assertEquals(Veredito.PESSIMO to "Wake up.", vereditoDaFala(comVeredito(Veredito.PESSIMO, "Wake up.")))
+        assertEquals("Fine.", comVeredito(Veredito.BOM, "Fine."))
+        // A busca com o juízo na frente ainda é busca
+        assertEquals("who invented the transistor", consultaDaBusca("[OK] SEARCH: who invented the transistor"))
+        // Bipe: na resposta péssima, e na segunda enrolada seguida; uma boa zera a conta
+        assertEquals(false to 1, bipeDoJuizo(Veredito.VAGO, 0))
+        assertEquals(true to 0, bipeDoJuizo(Veredito.VAGO, 1))
+        assertEquals(true to 0, bipeDoJuizo(Veredito.PESSIMO, 0))
+        assertEquals(false to 0, bipeDoJuizo(Veredito.BOM, 1))
+        // A instrução manda julgar, deixa o português e leva as palavras dele
+        val instrucao = instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40), palavras = listOf("Arduino", "Opala"))
+        assertTrue(instrucao.contains("[VAGUE]") && instrucao.contains("[BAD]") && instrucao.contains("He may answer in Portuguese"))
+        assertTrue(instrucao.contains("Words he often says, which the speech recognizer may mishear: Arduino, Opala."))
+        assertFalse(instrucaoDoTreinador(emptyList(), "", LocalTime.of(6, 40)).contains("Words he often says"))
+    }
+
+    @Test
+    fun palavrasDeleEmLista() {
+        assertEquals(listOf("Arduino", "Opala", "Nubank"), listaDePalavras("Arduino, Opala;\n Nubank , arduino"))
+        assertTrue(listaDePalavras("  ,, ").isEmpty())
+        assertEquals(PALAVRAS_MAX, listaDePalavras((1..50).joinToString(",") { "w$it" }).size)
     }
 
     @Test

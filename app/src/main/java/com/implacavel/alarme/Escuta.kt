@@ -13,6 +13,7 @@ import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -49,6 +50,7 @@ class Escuta(
     private val onIndisponivel: () -> Unit,
     private val servico: ComponentName? = null, // qual reconhecedor do celular; null = o padrão do sistema
     private val idioma: String = "en-US",
+    private val palavras: List<String> = emptyList(), // as dele ([Ajustes.palavras]): o reconhecedor tende a elas
 ) {
     private var hipotesesDaFrase: List<String> = emptyList() // as outras hipóteses da última frase terminada
     private var frasesDaVez = 0 // frases terminadas desde a [novaVez]
@@ -219,20 +221,21 @@ class Escuta(
         val esta = sessao
         val r = (if (servico != null) SpeechRecognizer.createSpeechRecognizer(ctx, servico) else SpeechRecognizer.createSpeechRecognizer(ctx)).also { reconhecedor = it }
         r.setRecognitionListener(Ouvido { esta == sessao && ativa })
-        r.startListening(
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, idioma)
-                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // as outras hipóteses vão pra IA ([alternativas])
-                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, lado)
-                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
-                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
-                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, TAXA)
+        val pedido = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, idioma)
+            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // as outras hipóteses vão pra IA ([alternativas])
+            .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, lado)
+            .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+            .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+            .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, TAXA)
                 // A sessão só acaba quando o cano fecha: nada de recomeçar a cada frase
-                .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE),
-        )
+            .putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, RecognizerIntent.EXTRA_AUDIO_SOURCE)
+        // Android 13+: o reconhecedor tende às palavras dele (um que não sabe, ignora)
+        if (palavras.isNotEmpty() && Build.VERSION.SDK_INT >= 33) pedido.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(palavras))
+        r.startListening(pedido)
     }
 
     /** Fecha a sessão de agora: o cano, a nossa ponta dele e o reconhecedor (que não avisa mais nada). */

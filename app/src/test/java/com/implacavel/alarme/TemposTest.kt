@@ -12,7 +12,7 @@ class TemposTest {
         assertEquals(Subida(0.10f, 0.40f, 30_000), t.subida)
         assertEquals(40, t.cameraMin) // 20 fáceis + 20 exigentes
         assertEquals(5, t.frases)
-        assertEquals(24, t.manhaMin) // 10 de conversa + 4 pra sair + 10 andando
+        assertEquals(25, t.manhaMin) // 10 de conversa + 5 pra sair + 10 andando
         assertEquals(t, t.ajustado())
     }
 
@@ -47,8 +47,8 @@ class TemposTest {
         assertEquals("Time to move, sir. Get dressed and go outside: you have half a minute to start walking.", falaDeSair(PRAZO_SAIR_TESTE_MS))
         assertEquals("Time to move, sir. Get dressed and go outside.", falaDeSair(0))
         // A mini tarefa promete o tempo que dá de fato: 3 min de verdade, meio minuto no teste
-        assertEquals("Fell asleep, sir? Repeat this sentence and you get three more minutes: Go.", falaDaMiniTarefa("Go.", PREPARO_EXTRA_MS))
-        assertEquals("Three more minutes, sir. Get dressed and go outside.", falaMaisTempo(PREPARO_EXTRA_MS))
+        assertEquals("Fell asleep, sir? Repeat this sentence and you get five more minutes: Go.", falaDaMiniTarefa("Go.", PREPARO_EXTRA_MS))
+        assertEquals("Five more minutes, sir. Get dressed and go outside.", falaMaisTempo(PREPARO_EXTRA_MS))
         assertEquals("Half a minute more, sir. Get dressed and go outside.", falaMaisTempo(PREPARO_EXTRA_TESTE_MS))
     }
 }
