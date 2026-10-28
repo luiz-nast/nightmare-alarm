@@ -300,8 +300,8 @@ class AlarmeService : Service() {
 
         /** Toca o alarme em andamento (ou atualiza o que já toca). */
         fun tocar(ctx: Context) {
-            // Só falha se o disparo veio sem alarme exato (Android 12 sem a permissão): aí o sistema
-            // não deixa iniciar serviço em segundo plano e não há o que fazer
+            // Falha se o Android não deixa iniciar serviço em segundo plano: o disparo sem alarme exato (Android 12 sem a
+            // permissão), ou a volta direto do [App] sem o app fora da economia de bateria (aí vale a retomada, logo depois)
             runCatching { ContextCompat.startForegroundService(ctx, comando(ctx, ACAO_TOCAR)) }
                 .onFailure { Log.e(TAG, "Serviço: o Android não deixou começar a tocar", it) }
         }
@@ -424,13 +424,11 @@ class AlarmeService : Service() {
 
     /**
      * Enquanto toca: empurra a retomada pra frente (se o app morrer, ela dispara e o alarme volta),
-     * mantém o processador acordado (quem acende a tela é a AlarmeActivity) e põe a vigia do desligar de volta na
-     * lista, se alguém a tirou à mão nas Configurações.
+     * e mantém o processador acordado (quem acende a tela é a AlarmeActivity).
      */
     private val renovar = object : Runnable {
         override fun run() {
             Agendador.agendarRetomada(this@AlarmeService)
-            VigiaDoDesligar.ligar(this@AlarmeService) // já ligada: só lê a lista, não escreve nada
             processador.acquire(RENOVAR_MS * 12)
             salvarProgresso()
             atualizarNotificacao()
@@ -653,7 +651,6 @@ class AlarmeService : Service() {
         _caminhada.value = null
         _miniTarefa.value = null
         _tocando.value = null
-        VigiaDoDesligar.desligar(this)
         _comCaminhada.value = false
         if (processador.isHeld) processador.release()
         // Um instante pras últimas linhas chegarem no arquivo
@@ -683,7 +680,6 @@ class AlarmeService : Service() {
         if (!jaTocava) esquecerManha()
         _tocando.value = alarme
         _temposDoAlarme.value = em.tempos
-        VigiaDoDesligar.ligar(this) // só enquanto o alarme toca: o dia inteiro, os bancos estranham (veja VigiaDoDesligar.kt)
         mostrarNotificacao(alarme)
         sirene.preparar(em, comeco = !jaTocava)
         // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está.

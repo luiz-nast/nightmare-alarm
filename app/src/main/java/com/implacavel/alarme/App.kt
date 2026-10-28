@@ -28,16 +28,20 @@ class App : Application() {
         Ajustes.carregar(this)
         Sons.carregar(this)
         Notificacoes.criarCanal(this)
-        // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta em instantes, e
-        // a missão continua de onde estava ([Ajustes.progresso]). Um teste não volta: o dono desligou o celular pra
-        // fugir dos bipes de um teste (10-17), e ele voltou depois do reinício tocando o toque do sistema. Pra encerrar
-        // um alarme de verdade no meio, só pelo cabo ([PararPeloCabo])
+        // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta na hora, e a
+        // missão continua de onde estava ([Ajustes.progresso]). Um teste não volta: o dono desligou o celular pra fugir
+        // dos bipes de um teste (10-17), e ele voltou depois do reinício tocando o toque do sistema. Pra encerrar um
+        // alarme de verdade no meio, só pelo cabo ([PararPeloCabo])
         Ajustes.emAndamento?.let {
             if (it.alarme.deTeste) {
                 Log.i(TAG, "Teste ${it.alarme.id} foi interrompido no meio: fica por isso mesmo")
                 Ajustes.emAndamento = null
             } else {
                 Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
+                // Já, daqui: o app fora da economia de bateria (o cartão "Unrestricted battery") pode começar o serviço em
+                // segundo plano. Pela retomada do AlarmManager, que arredonda pra uns 5 s, a música demorava 6,5 s depois do
+                // celular religar (10-25). A retomada fica de reserva, pra se o Android não deixar
+                AlarmeService.tocar(this)
                 Agendador.agendarRetomada(this, 2_000)
             }
         }

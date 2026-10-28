@@ -148,9 +148,6 @@ private fun TelaAlarme(alarme: Alarme) {
     // A câmera da missão também é do serviço: a tela só liga o visor nela e pinta o que ela viu
     val camera by AlarmeService.camera.collectAsStateWithLifecycle()
     val leituraDaCamera by AlarmeService.leituraDaCamera.collectAsStateWithLifecycle()
-    // O cadeado: a vigia do menu de desligar está no ar (o app liga quando o alarme toca, com a permissão do cabo)
-    val vigiaNoAr by VigiaDoDesligar.noAr.collectAsStateWithLifecycle()
-    val aviso = if (vigiaNoAr) "🔒 Power menu blocked" else null
 
     // A tela do alarme fica no brilho máximo do começo ao fim; na etapa da câmera, também clara, pra iluminar o rosto no escuro
     BrilhoMaximo()
@@ -208,7 +205,7 @@ private fun TelaAlarme(alarme: Alarme) {
             { BotoesDoTeste(f, comFrases = tempos.frases > 0, corTexto, onIr = { AlarmeService.irPraFase(ctx, it) }, onCancelar = { AlarmeService.cancelarTeste(ctx) }) }
         }
         val pagina: @Composable (@Composable () -> Unit) -> Unit = { conteudo ->
-            PaginaAlarme(alturaMinima, deitado, rolagem, corTexto, pulso, hhmm(agora.toLocalTime()), alarme.nome, aviso, rodape, conteudo)
+            PaginaAlarme(alturaMinima, deitado, rolagem, corTexto, pulso, hhmm(agora.toLocalTime()), alarme.nome, rodape, conteudo)
         }
         when {
             comemorando -> pagina { EtapaFim() }
@@ -255,8 +252,8 @@ private fun TelaAlarme(alarme: Alarme) {
 }
 
 /**
- * Moldura das telas do alarme: ícone pulsando, hora, nome e o [aviso] da vigia do menu de desligar, [conteudo] (a etapa) e, nos testes, o [rodape] (os
- * botões de fase). Em pé, um embaixo do outro, numa coluna rolável com altura mínima da tela (centraliza quando cabe e
+ * Moldura das telas do alarme: ícone pulsando, hora, nome, [conteudo] (a etapa) e, nos testes, o [rodape] (os botões de
+ * fase). Em pé, um embaixo do outro, numa coluna rolável com altura mínima da tela (centraliza quando cabe e
  * rola em celulares pequenos); [deitado], lado a lado, com a etapa rolando sozinha na metade dela.
  */
 @Composable
@@ -268,7 +265,6 @@ private fun PaginaAlarme(
     pulso: State<Float>,
     hora: String,
     nome: String,
-    aviso: String?,
     rodape: (@Composable () -> Unit)?,
     conteudo: @Composable () -> Unit,
 ) {
@@ -285,7 +281,6 @@ private fun PaginaAlarme(
             )
             Text(hora, color = corTexto, fontSize = 72.sp, fontWeight = FontWeight.Bold)
             Text(nome, color = corTexto, fontSize = 22.sp, textAlign = TextAlign.Center)
-            if (aviso != null) Text(aviso, color = corTexto, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
         }
     }
     // A etapa muda de lugar ao girar sem recomeçar (o microfone e a câmera seguem ligados)
