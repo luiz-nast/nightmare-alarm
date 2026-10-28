@@ -194,8 +194,15 @@ class ConversaTest {
         // Do motor pro serviço o juízo vai na frente, e volta igual
         assertEquals(Veredito.PESSIMO to "Wake up.", vereditoDaFala(comVeredito(Veredito.PESSIMO, "Wake up.")))
         assertEquals("Fine.", comVeredito(Veredito.BOM, "Fine."))
-        // A busca com o juízo na frente ainda é busca
+        // A busca com o juízo na frente ainda é busca, também com o juízo numa linha e a busca na outra
         assertEquals("who invented the transistor", consultaDaBusca("[OK] SEARCH: who invented the transistor"))
+        assertEquals("who invented the transistor", consultaDaBusca("[OK]\nSEARCH: who invented the transistor"))
+        // O modelo enfeitando o juízo (negrito, aspas, lista) ou pondo no fim: o juízo vale, e a voz nunca lê "BAD"
+        assertEquals(Veredito.PESSIMO to "That was garbage, you dumbass.", vereditoDaFala("**[BAD]** That was garbage, you dumbass."))
+        assertEquals(Veredito.VAGO to "Lazy answer, sir. What time?\"", vereditoDaFala("\"[VAGUE] Lazy answer, sir. What time?\""))
+        assertEquals(Veredito.BOM to "Good. What next?", vereditoDaFala("- [OK] Good. What next?"))
+        assertEquals(Veredito.VAGO to "Fine, sir. What next?", vereditoDaFala("Fine, sir. What next? [VAGUE]"))
+        assertEquals(Veredito.PESSIMO to "Wake up. Again.", vereditoDaFala("[BAD] Wake up. [BAD] Again."))
         // Bipe: na resposta péssima, e na segunda enrolada seguida; uma boa zera a conta
         assertEquals(false to 1, bipeDoJuizo(Veredito.VAGO, 0))
         assertEquals(true to 0, bipeDoJuizo(Veredito.VAGO, 1))

@@ -172,7 +172,8 @@ class Sirene(private val ctx: Context) {
      * Bipe curto número [n] da vigia (a pessoa parou de olhar pra câmera): enquanto ele toca (e mais
      * [FOLGA_BIPE_MS]), o volume de alarme fica no degrau dele ([volumeDoBipe]), por cima da trava;
      * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte. No teste, param
-     * no volume dos avisos (40%). Devolve quanto o bipe dura (ms), pra conversa não ouvir o próprio bipe.
+     * no degrau [VOLUME_DO_BIPE_DE_TESTE] (2 de 15 no S24 FE), sem o som forte. Devolve quanto o bipe dura (ms), pra
+     * conversa não ouvir o próprio bipe.
      */
     fun bipe(n: Int, degraus: Int = BIPES_ATE_ZERAR, som: Int = if (n >= degraus) R.raw.bipe_final else R.raw.bipe): Long {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
@@ -356,8 +357,9 @@ class Sirene(private val ctx: Context) {
     }
 
     /**
-     * A música da foto do alarme (no remédio, o toque suave do app); senão o toque de alarme do
-     * celular; se nada puder ser lido (ex.: antes do primeiro desbloqueio), os bipes do app.
+     * A música da foto do alarme (no remédio, o toque suave do app; a da biblioteca, [Sons], se lê já antes do primeiro
+     * desbloqueio); senão o toque de alarme do celular; se nada puder ser lido (ex.: um toque fora da biblioteca antes do
+     * primeiro desbloqueio), os bipes do app.
      */
     private fun tocarSom() {
         val candidatos = listOfNotNull(

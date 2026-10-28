@@ -177,9 +177,9 @@ const val METAS_MAX_LETRAS = 800
 
 /**
  * A primeira fala "da pessoa" pra IA, inventada pelo app: com anotações das manhãs de antes ([memoria]), ela abre
- * retomando uma coisa dele (como foi, o que vem agora: é isso que faz parecer um amigo, e não um script); sem elas,
- * com a primeira das [manchetes] (a principal do Google Notícias, sem o nome do jornal), contando do que é antes de
- * perguntar; sem nada, com o dia dele. Escolhida aqui, e não pela IA: deixada por conta dela, ela perguntava "o que
+ * retomando uma coisa dele (como foi, o que vem agora: é isso que faz parecer quem o conhece, e não um script); sem
+ * elas, com a primeira das [manchetes] (a principal do Google Notícias, sem o nome do jornal), contando do que é antes
+ * de perguntar; sem nada, com o dia dele. Escolhida aqui, e não pela IA: deixada por conta dela, ela perguntava "o que
  * achou das notícias?", sem dizer qual.
  */
 fun pedidoDeAbertura(manchetes: List<String>, memoria: String = ""): String {
@@ -300,21 +300,27 @@ const val NAO_ENTENDIDOS_ATE_O_BIPE = 3
 enum class Veredito { BOM, VAGO, PESSIMO }
 
 /**
- * Separa o juízo do começo da fala da IA ("[OK]", "[VAGUE]", "[BAD]"; também sem colchetes, em maiúsculas, com
- * dois-pontos) do resto. Sem juízo (a IA esqueceu), vale [Veredito.BOM]: na dúvida, ninguém leva bipe.
+ * Separa o juízo da fala da IA ("[OK]", "[VAGUE]", "[BAD]"; também sem colchetes, em maiúsculas, com dois-pontos) do
+ * resto. O normal é ele vir no começo, mas o modelo às vezes enfeita (negrito, aspas, um travessão de lista) ou põe no
+ * fim; e uma etiqueta que sobra em qualquer lugar sai da fala, senão a voz lê "BAD" (revisão de 10-28). Sem juízo (a IA
+ * esqueceu), vale [Veredito.BOM]: na dúvida, ninguém leva bipe.
  */
 fun vereditoDaFala(resposta: String): Pair<Veredito, String> {
-    val achado = VEREDITO.find(resposta) ?: VEREDITO_SEM_COLCHETES.find(resposta) ?: return Veredito.BOM to resposta.trim()
-    val veredito = when (achado.groupValues[1].uppercase()) {
+    val noComeco = VEREDITO.find(resposta) ?: VEREDITO_SEM_COLCHETES.find(resposta)
+    val achado = noComeco ?: VEREDITO_NO_MEIO.find(resposta)
+    val veredito = when (achado?.groupValues?.get(1)?.uppercase()) {
         "VAGUE" -> Veredito.VAGO
         "BAD" -> Veredito.PESSIMO
         else -> Veredito.BOM
     }
-    return veredito to resposta.substring(achado.range.last + 1).trim()
+    val resto = if (noComeco != null) resposta.substring(noComeco.range.last + 1) else resposta
+    return veredito to resto.replace(VEREDITO_NO_MEIO, " ").replace(Regex("[ \\t]+"), " ").trim()
 }
 
-private val VEREDITO = Regex("^\\s*\\[\\s*(OK|VAGUE|BAD)\\s*]\\s*[:\\-]?\\s*", RegexOption.IGNORE_CASE)
-private val VEREDITO_SEM_COLCHETES = Regex("^\\s*(OK|VAGUE|BAD)\\s*:\\s*")
+/** O juízo no começo, depois de enfeites (espaços, aspas, asteriscos, #, >, travessão), com os enfeites de fechar. */
+private val VEREDITO = Regex("^[\\s\"“'*_#>\\-]*\\[\\s*(OK|VAGUE|BAD)\\s*][*_\"”'\\s]*[:\\-]?\\s*", RegexOption.IGNORE_CASE)
+private val VEREDITO_SEM_COLCHETES = Regex("^[\\s\"“'*_#>\\-]*(OK|VAGUE|BAD)[*_]*\\s*:\\s*")
+private val VEREDITO_NO_MEIO = Regex("\\[\\s*(OK|VAGUE|BAD)\\s*]", RegexOption.IGNORE_CASE)
 
 /** A fala com o juízo na frente, do jeito que o motor passa pro serviço (a limpeza da fala, [limparFala], tiraria os colchetes). */
 fun comVeredito(veredito: Veredito, fala: String): String = when (veredito) {
@@ -397,7 +403,8 @@ private const val PALAVRAS_MINIMAS = 3
  * o chute errado puxava artigos errados.
  */
 fun consultaDaBusca(resposta: String): String? {
-    val linha = resposta.trim().lineSequence().firstOrNull { it.isNotBlank() }?.let { vereditoDaFala(it).second } ?: return null
+    // O juízo sai da resposta inteira antes: "[OK]" numa linha e "SEARCH: ..." na outra ainda é busca
+    val linha = vereditoDaFala(resposta).second.lineSequence().firstOrNull { it.isNotBlank() } ?: return null
     val achada = BUSCA.find(linha) ?: return null
     val consulta = achada.groupValues[1]
         .split(Regex("[:.;!?]"))[0]
@@ -505,13 +512,15 @@ fun pedidoDeContinuar(respostaAnterior: String, resposta: String): String =
         "Ask one short question about what he said before.]"
 
 /**
- * As regras da IA (a "instrução de sistema", em inglês): um amigo bem informado de manhã, que chama a pessoa de "sir",
- * conta coisas (um fato, uma opinião, uma dica) antes de perguntar, responde o que ele pergunta, pode pedir uma busca
- * na internet ("SEARCH: ...", [consultaDaBusca]) e usa o que sabe dele: o que ele contou de si ([sobreEle],
- * Settings › "About you") e as anotações das manhãs de antes ([memoria]). Conversa sobre as [noticias] do dia
- * (manchetes em português, que ela traduz), o dia e as [metas] dele, se vierem. Fica no assunto enquanto ele rende e
- * só troca quando morre (o dono reclamou da IA que pulava de assunto a cada resposta, como se só medisse o barulho
- * dele). Nunca manda dormir nem diz que o alarme acabou. [hora] é a de agora.
+ * As regras da IA (a "instrução de sistema", em inglês): um treinador da manhã bem informado e exigente, não um amigo
+ * dele (10-28: a IA estava "muito meu amigo"), que chama a pessoa de "sir", julga cada resposta dele ([Veredito]: a
+ * etiqueta no começo da fala, o xingamento e o bipe), conta coisas (um fato, uma opinião, uma dica) antes de perguntar,
+ * responde o que ele pergunta, pode pedir uma busca na internet ("SEARCH: ...", [consultaDaBusca]) e usa o que sabe
+ * dele: o que ele contou de si ([sobreEle], Settings › "About you"), as palavras que ele usa e o reconhecedor erra
+ * ([palavras], Settings › "Your words") e as anotações das manhãs de antes ([memoria]). Conversa sobre as [noticias]
+ * do dia (manchetes em português, que ela traduz), o dia e as [metas] dele, se vierem. Fica no assunto enquanto ele
+ * rende e só troca quando morre (o dono reclamou da IA que pulava de assunto a cada resposta, como se só medisse o
+ * barulho dele). Nunca manda dormir nem diz que o alarme acabou. [hora] é a de agora.
  *
  * Antes (até 10-18) cada fala era só uma pergunta de 15 palavras: o dono achou a IA "burra", seguindo um script,
  * sem nunca contar nada nem se conectar com ele, e teve que repetir em 4 testes que quer aprender eletrônica.

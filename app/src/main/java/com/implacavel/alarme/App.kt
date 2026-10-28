@@ -35,6 +35,8 @@ class App : Application() {
         Ajustes.emAndamento?.let {
             if (it.alarme.deTeste) {
                 Log.i(TAG, "Teste ${it.alarme.id} foi interrompido no meio: fica por isso mesmo")
+                // O volume de alarme ficou no da subida ou num bipe do teste: volta o de antes dele, logo abaixo
+                Ajustes.volumeParaDevolver = it.volume
                 Ajustes.emAndamento = null
             } else {
                 Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")

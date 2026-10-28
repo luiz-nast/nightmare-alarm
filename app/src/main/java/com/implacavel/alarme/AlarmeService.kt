@@ -601,8 +601,9 @@ class AlarmeService : Service() {
         val alarme = _tocando.value
         when {
             acao == ACAO_TOCAR -> iniciar()
-            // Comando atrasado, de quando o alarme já tinha parado: só fecha o serviço
-            alarme == null -> pararServico()
+            // Comando atrasado, de quando o alarme já tinha parado: só fecha o serviço. Com o startId: se um TOCAR veio
+            // logo atrás (o App voltando um alarme interrompido), o serviço fica pra ele
+            alarme == null -> pararServico(startId)
             acao == ACAO_ENCERRAR_SEM_MISSAO -> concluir(comemorar = false)
             // Nem repetindo o DESLIGAR de outro alarme (a notificação sempre traz o mesmo) dá pra fugir da missão
             acao == ACAO_DESLIGAR -> if (!alarme.missao) concluir()
@@ -1111,7 +1112,7 @@ class AlarmeService : Service() {
 
     // ---------------------------------------------------------------------------------------------------------
     // Despertador "conversa + caminhada": depois do bom dia, a conversa com a IA ([Tempos.conversaMin] de conversa
-    // pura, 10 por padrão) e a caminhada ([Tempos.prepararMin] pra sair e [Tempos.caminhadaMin] andando: 4 e 10 por
+    // pura, 10 por padrão) e a caminhada ([Tempos.prepararMin] pra sair e [Tempos.caminhadaMin] andando: 5 e 10 por
     // padrão), chova ou faça sol. Tudo pelos relógios daqui: a IA só produz o
     // texto das falas e nunca encurta, pausa ou acaba nada.
 
@@ -1392,9 +1393,10 @@ class AlarmeService : Service() {
         naoEntendidos = 0
         val repete = ultimaFalaEntendida.ifEmpty { FALA_NAO_ENTENDI }
         val rodada = rodadaConversa
+        val vez = vezDaIa // ele falou de novo durante o bipe ([descartarResposta]): a pergunta velha não toca no meio da vez dele
         val bipe = sirene.bipe(BIPE_DO_NAO_ENTENDI)
         escuta?.surdoPor(bipe + ATRASO_DO_BIPE_MS)
-        handler.postDelayed({ if (rodada == rodadaConversa && _conversa.value != null) falarDaIa(repete) }, bipe + ATRASO_DO_BIPE_MS)
+        handler.postDelayed({ if (rodada == rodadaConversa && vez == vezDaIa && _conversa.value != null) falarDaIa(repete) }, bipe + ATRASO_DO_BIPE_MS)
     }
 
     /**
@@ -2098,10 +2100,10 @@ class AlarmeService : Service() {
         pararServico()
     }
 
-    /** Fecha só este serviço, sem mexer no alarme em andamento. */
-    private fun pararServico() {
+    /** Fecha só este serviço, sem mexer no alarme em andamento; com [startId], só se nenhum comando chegou depois dele. */
+    private fun pararServico(startId: Int? = null) {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        if (startId != null) stopSelf(startId) else stopSelf()
     }
 
     /** Vira serviço em primeiro plano exibindo a notificação do alarme. */
@@ -2118,7 +2120,10 @@ class AlarmeService : Service() {
                 // segue só com o de sempre; a etapa então precisa da tela
                 Log.w(TAG, "Serviço: sem os tipos location e microphone (${it.javaClass.simpleName}: ${it.message?.take(100)})")
                 tiposDoServico = comum
-                ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), comum)
+                // De novo no meio do alarme, com o app em segundo plano, o Android pode recusar este também: sem cair (uma
+                // queda conta pra válvula de defeito), o serviço segue no primeiro plano que já tinha
+                runCatching { ServiceCompat.startForeground(this, Notificacoes.ID_TOCANDO, criarNotificacao(alarme), comum) }
+                    .onFailure { e -> Log.w(TAG, "Serviço: o Android não deixou nem o tipo de sempre (${e.javaClass.simpleName})") }
             }
     }
 

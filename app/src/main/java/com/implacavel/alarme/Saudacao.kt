@@ -62,7 +62,7 @@ const val FALA_NAO_NEGOCIA = "Not my call, sir. What is the first thing you will
 
 /**
  * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a voz oferece a [frase] no primeiro bipe de parado, pelo
- * tempo a mais que ela dá ([extraMs], o [preparoExtra]: 3 min; no teste, meio minuto).
+ * tempo a mais que ela dá ([extraMs], o [preparoExtra]: 5 min; no teste, meio minuto).
  */
 fun falaDaMiniTarefa(frase: String, extraMs: Long): String =
     "Fell asleep, sir? Repeat this sentence and you get ${tempoAMais(extraMs)}: $frase"
@@ -71,7 +71,7 @@ fun falaDaMiniTarefa(frase: String, extraMs: Long): String =
 fun falaMaisTempo(extraMs: Long): String =
     "${tempoAMais(extraMs).replaceFirstChar { it.uppercase() }}, sir. Get dressed and go outside."
 
-/** "three more minutes", "one more minute" ou "half a minute more", falado. */
+/** "five more minutes", "one more minute" ou "half a minute more", falado. */
 private fun tempoAMais(ms: Long): String = when {
     ms < 60_000L -> "half a minute more"
     ms < 120_000L -> "one more minute"

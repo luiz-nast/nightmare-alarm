@@ -34,7 +34,7 @@ const val CAMINHADA_TESTE_MS = 3 * 60_000L
 const val PRAZO_SAIR_TESTE_MS = 30_000L
 
 /**
- * A mini tarefa do prazo: o dono dorme tão pesado que os 4 min passam sem ele sentir (10-22). No primeiro bipe de
+ * A mini tarefa do prazo: o dono dorme tão pesado que o prazo inteiro passa sem ele sentir (10-22). No primeiro bipe de
  * parado depois do prazo ([PARADO_MS]), a tela oferece uma vez só uma frase pra repetir ([fraseDaMiniTarefa]);
  * repetida, o prazo ganha mais isto (com as ondas de novo). Se ele andou depois desse bipe, a oferta some e não
  * volta: ele já acordou. No teste, [PREPARO_EXTRA_TESTE_MS].
@@ -184,7 +184,7 @@ private const val RAIO_DA_TERRA_M = 6_371_000.0
 /** Quanto tempo andando a caminhada do [alarme] pede: o dos [tempos] (de começo, 10 min); no teste, [CAMINHADA_TESTE_MS]. */
 fun metaCaminhada(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (alarme.deTeste) CAMINHADA_TESTE_MS else minutos(tempos.caminhadaMin)
 
-/** O prazo pra sair de casa do [alarme], depois da conversa: o dos [tempos] (de começo, 4 min); no teste, [PRAZO_SAIR_TESTE_MS]. */
+/** O prazo pra sair de casa do [alarme], depois da conversa: o dos [tempos] (de começo, 5 min); no teste, [PRAZO_SAIR_TESTE_MS]. */
 fun prazoSair(alarme: Alarme, tempos: Tempos = TEMPOS_PADRAO): Long = if (alarme.deTeste) PRAZO_SAIR_TESTE_MS else minutos(tempos.prepararMin)
 
 /**

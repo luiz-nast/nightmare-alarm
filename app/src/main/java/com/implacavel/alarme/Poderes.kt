@@ -17,8 +17,7 @@ import androidx.core.net.toUri
 /**
  * Cada permissão que o alarme precisa, com a checagem ([liberado]) e o jeito de liberar.
  * [permissao] é a permissão pedida com o diálogo do sistema, quando existe (o pedido vai com [pedido]); as
- * demais, e as já negadas no diálogo, são liberadas numa tela das Configurações ([abrirConfiguracao]), menos o
- * menu de desligar, que não tem tela no celular: [abrirConfiguracao] abre os passos no README (a permissão vem pelo cabo).
+ * demais, e as já negadas no diálogo, são liberadas numa tela das Configurações ([abrirConfiguracao]).
  */
 enum class Poder(val titulo: String, val explicacao: String, val permissao: String? = null) {
     NOTIFICACOES(
@@ -63,8 +62,8 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
         }
 
     /**
-     * Abre onde este poder é liberado: a tela das Configurações ou, no menu de desligar, os passos no README; se não
-     * abrir, a tela do app. Numa tarefa separada: assim a tela do alarme, ao voltar, não fecha as Configurações junto.
+     * Abre onde este poder é liberado: a tela das Configurações; se não abrir, a tela do app. Numa tarefa separada:
+     * assim a tela do alarme, ao voltar, não fecha as Configurações junto.
      */
     fun abrirConfiguracao(ctx: Context) {
         val novaTarefa = Intent.FLAG_ACTIVITY_NEW_TASK

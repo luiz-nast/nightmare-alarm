@@ -38,7 +38,7 @@ const val VOLUME_DA_VOZ = 0.30f
  *   [SUBIDA_REMEDIO].
  * @property caminhada despertador "conversa + caminhada": depois do STOP, a conversa com a IA do celular, o prazo pra
  *   sair e a caminhada na rua, chova ou faça sol (sem a IA, direto pra caminhada); os tempos são os dos ajustes
- *   ([Tempos]: de começo 10, 4 e 10 min). Sem ele, o despertador é o "câmera + frases". Só vale com [missao].
+ *   ([Tempos]: de começo 10, 5 e 10 min). Sem ele, o despertador é o "câmera + frases". Só vale com [missao].
  * @property som o som deste alarme: o nome de um arquivo da biblioteca ([Sons]); null = o padrão da biblioteca (ou,
  *   sem padrão, o toque de alarme do celular). O remédio não usa: toca o toque suave do app.
  */
