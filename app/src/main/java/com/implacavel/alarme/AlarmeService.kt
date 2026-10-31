@@ -630,7 +630,7 @@ class AlarmeService : Service() {
             acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
             acao == ACAO_DAR_TEMPO -> foraAte = SystemClock.elapsedRealtime() + TEMPO_FORA_MS
             acao == ACAO_ONDAS -> ondas(intent.getBooleanExtra(EXTRA_LIGADAS, true))
-            acao == ACAO_MINI_TAREFA -> if (intent.getBooleanExtra(EXTRA_ABRIR, true)) abrirMiniTarefa() else fecharMiniTarefa("ele voltou pra caminhada")
+            acao == ACAO_MINI_TAREFA -> if (intent.getBooleanExtra(EXTRA_ABRIR, true)) abrirMiniTarefa() else voltarDaMiniTarefa()
             // Os botões de fase e de cancelar só existem na tela de um alarme de teste; um comando atrasado não mexe num alarme de verdade
             acao == ACAO_FASE -> if (alarme.deTeste) intent.getStringExtra(EXTRA_FASE)?.let { nome -> FaseDoTeste.entries.firstOrNull { it.name == nome } }?.let(::irPraFase)
             acao == ACAO_CANCELAR_TESTE -> if (alarme.deTeste && !cumprido) {
@@ -1809,7 +1809,7 @@ class AlarmeService : Service() {
         handler.removeCallbacks(vigiaDaCaminhada)
         sirene.falar(voz?.fixa(FALA_DO_BOTAO)) {
             // Ainda só o botão: os bipes seguem (ele andou, a música voltou ou a tela abriu: já cuidaram dos bipes)
-            if (_miniTarefa.value?.aberta == false) handler.postDelayed(vigiaDaCaminhada, ENTRE_BIPES_PARADO_MS)
+            if (_miniTarefa.value?.aberta == false) retomarBipesParado()
         }
     }
 
@@ -1850,13 +1850,33 @@ class AlarmeService : Service() {
     /** O tempo da tela da mini tarefa acabou sem ele repetir a frase. */
     private val fimDaMiniTarefa = Runnable { fecharMiniTarefa("o tempo dela acabou") }
 
-    /** A tela da mini tarefa fecha sem o prazo a mais (o tempo dela, o "voltar" ou sem reconhecedor): os bipes voltam de onde estavam. */
+    /**
+     * A tela da mini tarefa fecha sem o prazo a mais (o tempo dela, o "voltar" ou sem reconhecedor): a voz da frase, se
+     * ainda falava, para (senão seguia oferecendo o prazo e brigava com o volume dos bipes), e os bipes voltam de onde estavam.
+     */
     private fun fecharMiniTarefa(motivo: String) {
         if (_miniTarefa.value?.aberta != true) return
         Log.i(TAG, "Caminhada: mini tarefa fechada ($motivo), os bipes voltam")
         pararMiniTarefa()
+        sirene.calar()
         _miniTarefa.value = null
+        retomarBipesParado()
+    }
+
+    /** "Voltar" no primeiro segundo e meio da tela da mini tarefa é o mesmo toque que a abriu, dado duas vezes: não fecha. */
+    private fun voltarDaMiniTarefa() {
+        val ate = _miniTarefa.value?.ate ?: return
+        if (SystemClock.elapsedRealtime() < ate - MINI_TAREFA_MAX_MS + TOQUE_DUPLO_MS) return
+        fecharMiniTarefa("ele voltou pra caminhada")
+    }
+
+    /**
+     * O próximo bipe de parado, um degrau acima do último ([bipesParado] segue), daqui a [ENTRE_BIPES_PARADO_MS]; a barra
+     * da tela (que conta do [ultimoPasso]) é posta no mesmo ponto, pra mostrar o bipe que vai tocar, não o tempo da pausa.
+     */
+    private fun retomarBipesParado() {
         handler.removeCallbacks(vigiaDaCaminhada)
+        _ultimoPasso.value = SystemClock.elapsedRealtime() + ENTRE_BIPES_PARADO_MS - PARADO_MS - bipesParado * ENTRE_BIPES_PARADO_MS
         handler.postDelayed(vigiaDaCaminhada, ENTRE_BIPES_PARADO_MS)
     }
 
@@ -1871,6 +1891,7 @@ class AlarmeService : Service() {
         _miniTarefa.value = null
         prazoAte = SystemClock.elapsedRealtime() + preparoExtra(alarme)
         _caminhada.value = _caminhada.value?.copy(prazoAte = prazoAte)
+        salvarProgresso() // o prazo ganho fica gravado já: se o app cair agora, ele não volta com o prazo vencido
         ondasNoPrazo()
         adiarVigiaDaCaminhada()
         sirene.acerto { sirene.falar(voz?.fixa(FALA_DE_MAIS_TEMPO)) }
@@ -1994,6 +2015,7 @@ class AlarmeService : Service() {
         // Andou depois do primeiro bipe: já acordou, o botão (ou a tela) da mini tarefa some e não volta
         if (_miniTarefa.value != null) {
             Log.i(TAG, "Caminhada: andou, a mini tarefa some")
+            if (_miniTarefa.value?.aberta == true) sirene.calar() // a voz da frase, se ainda falava
             pararMiniTarefa()
             _miniTarefa.value = null
             miniTarefaRetirada = true

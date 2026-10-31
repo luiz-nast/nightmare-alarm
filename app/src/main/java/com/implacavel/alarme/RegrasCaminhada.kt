@@ -50,6 +50,9 @@ const val PREPARO_EXTRA_TESTE_MS = 30_000L
  */
 const val MINI_TAREFA_MAX_MS = 60_000L
 
+/** O "voltar" da tela da mini tarefa nesse começo dela é o toque que abriu, repetido sem querer: não fecha (revisão de 10-31). */
+const val TOQUE_DUPLO_MS = 1_500L
+
 /** Quanto prazo a mini tarefa do [alarme] dá. */
 fun preparoExtra(alarme: Alarme): Long = if (alarme.deTeste) PREPARO_EXTRA_TESTE_MS else PREPARO_EXTRA_MS
 

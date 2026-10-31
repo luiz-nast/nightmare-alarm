@@ -19,4 +19,4 @@ fi
 ./gradlew --console=plain assembleRelease
 "$ADB" install -r app/build/outputs/apk/release/app-release.apk
 "$ADB" shell am start -n com.implacavel.alarme/.MainActivity > /dev/null
-echo "Done! Nightmare Alarm is open on the phone."
+echo "Done! Tourbillon Alarm is open on the phone."

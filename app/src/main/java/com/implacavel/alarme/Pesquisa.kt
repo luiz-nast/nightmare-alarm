@@ -26,7 +26,7 @@ const val FATOS_MAX = 6
 const val ARTIGO_MAX_LETRAS = 40_000
 
 /** A Wikimedia pede que cada app se identifique; sem isso, a Wikipédia recusa. */
-private const val AGENTE = "NightmareAlarm/1.0 (https://github.com/luiz-nast/nightmare-alarm)"
+private const val AGENTE = "TourbillonAlarm/1.0 (https://github.com/luiz-nast/tourbillon-alarm)"
 
 object Pesquisa {
     /** Procura [consulta] nas fontes, trata ([fatosRelevantes]) e junta ([resultadoDaBusca]); null sem nada (ou sem internet). Bloqueia a thread de quem chama, até [BUSCA_MAX_MS]. */

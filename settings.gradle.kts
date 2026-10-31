@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "NightmareAlarm"
+rootProject.name = "TourbillonAlarm"
 include(":app")

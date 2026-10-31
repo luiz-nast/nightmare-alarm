@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
 fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
     val proximo = alarmes.filter { it.ativo }.map { it.proximoDisparo(agora) }.minByOrNull { it.toEpochSecond() }
     Column(Modifier.padding(top = 16.dp, bottom = 4.dp)) {
-        Text("Nightmare Alarm", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+        Text("Tourbillon Alarm", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
         Text(
             if (proximo == null) {
                 "No alarm on"

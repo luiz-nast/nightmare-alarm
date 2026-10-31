@@ -48,7 +48,7 @@ private val Claro = lightColorScheme(
 )
 
 /**
- * A noite do Nightmare Alarm (a tela principal e o editor, 10-17, o dono pediu componentes escuros): tinta roxa quase
+ * A noite do Tourbillon Alarm (a tela principal e o editor, 10-17, o dono pediu componentes escuros): tinta roxa quase
  * preta de fundo, brasa (laranja-vermelho) no que acende e chama (botões, interruptor ligado, o tipo do alarme), lilás
  * nos destaques secundários e menta no que está certo. Nunca segue o sistema: é sempre esta.
  */

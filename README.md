@@ -1,4 +1,4 @@
-# Nightmare Alarm
+# Tourbillon Alarm
 
 An Android alarm clock app made to be impossible to ignore. It takes over the screen even with the phone locked and plays your music on loop at alarm volume, even in silent mode. To turn it off, you have to complete a mission: **say "STOP"** and then **look at the camera with your eyes open** for the time set in the app (20 + 20 minutes by default), until a ring is complete. Once it has rung, there is no other way out: no snoozing, no pausing, no app crash; turning the phone off cannot be blocked, but the alarm rings again as soon as the phone is back on.
 
@@ -6,6 +6,7 @@ There is also **"talk + walk"**: after STOP, a conversation in English with an A
 
 - **Stack:** Kotlin with Jetpack Compose (Material 3). Camera with CameraX; face and eyes with ML Kit, on the device itself.
 - **Tested on:** Galaxy S24 FE (SM-S721B), Android 16 / One UI 8.5.
+- **Name:** Tourbillon Alarm since 2026-10-31 (before: Nightmare Alarm, and Alarme Implacável at the start). The package `com.implacavel.alarme` and the log tag `Implacavel` stay as they were, so an update keeps the alarms, the sounds and the permissions.
 - **Language:** user interface, spoken lines and documentation in English; code identifiers, Kotlin file names, constants, the log tag, log messages and code comments in Brazilian Portuguese, by design.
 
 ## What the app does
