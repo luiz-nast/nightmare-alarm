@@ -86,11 +86,19 @@ data class Conversa(
 data class Caminhada(val andadoMs: Long, val metaMs: Long, val prazoAte: Long, val conferindoMs: Long = 0)
 
 /**
- * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a [frase] pra repetir e ganhar mais prazo, se já é a
- * [suaVez] de repetir (depois de a voz terminar de oferecer: antes, o reconhecedor ouviria a própria voz dizendo a
- * frase) e o que o reconhecedor do serviço já [ouvido].
+ * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): fechada, só o botão na tela da caminhada (pelo [extraMs] que
+ * ela dá); [aberta] pelo botão, a tela da [frase] pra repetir e ganhar mais prazo, sem bipe até [ate]
+ * (SystemClock.elapsedRealtime), se já é a [suaVez] de repetir (depois de a voz terminar de dizer a frase: antes, o
+ * reconhecedor ouviria a própria voz) e o que o reconhecedor do serviço já [ouvido].
  */
-data class MiniTarefa(val frase: String, val suaVez: Boolean, val ouvido: String = "")
+data class MiniTarefa(
+    val frase: String,
+    val extraMs: Long,
+    val aberta: Boolean = false,
+    val ate: Long = 0L,
+    val suaVez: Boolean = false,
+    val ouvido: String = "",
+)
 
 /** As etapas do despertador "conversa + caminhada", depois do STOP e do bom dia. */
 private enum class EtapaDaManha { CONVERSA, CAMINHADA }
@@ -112,10 +120,12 @@ class AlarmeService : Service() {
         private const val ACAO_ONDAS = "ondas"
         private const val ACAO_FASE = "fase"
         private const val ACAO_CANCELAR_TESTE = "cancelar_teste"
+        private const val ACAO_MINI_TAREFA = "mini_tarefa"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_LIGADAS = "ligadas"
         private const val EXTRA_FASE = "fase"
+        private const val EXTRA_ABRIR = "abrir"
 
         /**
          * Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. O Android ainda leva
@@ -181,6 +191,7 @@ class AlarmeService : Service() {
         private const val FALA_DE_NAO_NEGOCIAR = "nao_negocia"
         private const val FALA_DE_PROCURAR = "procurar"
         private const val FALA_DA_MINI_TAREFA = "mini_tarefa"
+        private const val FALA_DO_BOTAO = "botao_mini_tarefa"
         private const val FALA_DE_MAIS_TEMPO = "mais_tempo"
         private const val FALA_DE_NAO_ENTENDER = "nao_entendi"
 
@@ -335,6 +346,9 @@ class AlarmeService : Service() {
 
         /** Os botões "Back" e "Forward" de um alarme de teste: a manhã pula pra [fase] ([FaseDoTeste]). Num alarme de verdade, nada. */
         fun irPraFase(ctx: Context, fase: FaseDoTeste) { ctx.startService(comando(ctx, ACAO_FASE).putExtra(EXTRA_FASE, fase.name)) }
+
+        /** O botão da mini tarefa na tela da caminhada ([abrir]) e o "voltar" da tela dela (fechar, sem o prazo a mais). */
+        fun miniTarefa(ctx: Context, abrir: Boolean) { ctx.startService(comando(ctx, ACAO_MINI_TAREFA).putExtra(EXTRA_ABRIR, abrir)) }
 
         /** O botão "Cancel test" (depois da confirmação): o alarme de teste acaba agora, sem comemoração. Num alarme de verdade, nada. */
         fun cancelarTeste(ctx: Context) { ctx.startService(comando(ctx, ACAO_CANCELAR_TESTE)) }
@@ -565,6 +579,7 @@ class AlarmeService : Service() {
                 FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA,
                 FALA_DE_PROCURAR to FALA_PROCURAR,
                 FALA_DA_MINI_TAREFA to falaDaMiniTarefa(fraseDaMiniTarefa, preparoExtra(alarme)),
+                FALA_DO_BOTAO to falaDoBotaoDaMiniTarefa(preparoExtra(alarme)),
                 FALA_DE_MAIS_TEMPO to falaMaisTempo(preparoExtra(alarme)),
                 FALA_DE_NAO_ENTENDER to FALA_NAO_ENTENDI,
             )
@@ -615,6 +630,7 @@ class AlarmeService : Service() {
             acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
             acao == ACAO_DAR_TEMPO -> foraAte = SystemClock.elapsedRealtime() + TEMPO_FORA_MS
             acao == ACAO_ONDAS -> ondas(intent.getBooleanExtra(EXTRA_LIGADAS, true))
+            acao == ACAO_MINI_TAREFA -> if (intent.getBooleanExtra(EXTRA_ABRIR, true)) abrirMiniTarefa() else fecharMiniTarefa("ele voltou pra caminhada")
             // Os botões de fase e de cancelar só existem na tela de um alarme de teste; um comando atrasado não mexe num alarme de verdade
             acao == ACAO_FASE -> if (alarme.deTeste) intent.getStringExtra(EXTRA_FASE)?.let { nome -> FaseDoTeste.entries.firstOrNull { it.name == nome } }?.let(::irPraFase)
             acao == ACAO_CANCELAR_TESTE -> if (alarme.deTeste && !cumprido) {
@@ -1753,8 +1769,9 @@ class AlarmeService : Service() {
         _sentidos.value = null
     }
 
-    /** O reconhecedor da mini tarefa, se estava ouvindo, para. */
+    /** O reconhecedor da mini tarefa, se estava ouvindo, para (e o fim do tempo da tela dela não vale mais). */
     private fun pararMiniTarefa() {
+        handler.removeCallbacks(fimDaMiniTarefa)
         ouvinteDaMiniTarefa?.parar()
         ouvinteDaMiniTarefa = null
     }
@@ -1781,34 +1798,48 @@ class AlarmeService : Service() {
     }
 
     /**
-     * A mini tarefa do prazo pra sair, no primeiro bipe de parado depois dele ([ofereceMiniTarefa]): a voz oferece a
-     * frase e, quando termina, é a vez dela de repetir (o serviço escuta). Os bipes de parado esperam a voz acabar (um
-     * bipe no meio abaixa a voz e a frase não se entende) e seguem subindo enquanto ela repete: a mini tarefa não é
-     * um jeito de calar os bipes. Sem reconhecimento de voz, a oferta sai e os bipes seguem.
+     * A mini tarefa do prazo pra sair, no primeiro bipe de parado depois dele ([ofereceMiniTarefa]): o botão aparece na
+     * tela da caminhada e a voz avisa. Os bipes de parado esperam a voz acabar (um bipe no meio abaixa a voz) e seguem
+     * subindo enquanto o botão está lá: só a tela dele, aberta ([abrirMiniTarefa]), cala os bipes.
      */
     private fun oferecerMiniTarefa() {
-        Log.i(TAG, "Caminhada: mini tarefa oferecida (mais prazo se repetir a frase)")
-        val frase = fraseDaMiniTarefa
-        _miniTarefa.value = MiniTarefa(frase, suaVez = false)
+        val alarme = _tocando.value ?: return
+        Log.i(TAG, "Caminhada: mini tarefa oferecida (o botão, uma vez só)")
+        _miniTarefa.value = MiniTarefa(fraseDaMiniTarefa, preparoExtra(alarme))
         handler.removeCallbacks(vigiaDaCaminhada)
+        sirene.falar(voz?.fixa(FALA_DO_BOTAO)) {
+            // Ainda só o botão: os bipes seguem (ele andou, a música voltou ou a tela abriu: já cuidaram dos bipes)
+            if (_miniTarefa.value?.aberta == false) handler.postDelayed(vigiaDaCaminhada, ENTRE_BIPES_PARADO_MS)
+        }
+    }
+
+    /**
+     * O botão da mini tarefa: a tela dela abre, os bipes param por até [MINI_TAREFA_MAX_MS], a voz diz a frase e, quando
+     * termina, é a vez dele de repetir (o serviço escuta: vale com a tela fechada também). O botão tem uma vida só:
+     * aberto, não volta, nem se ele sair sem repetir, nem se o app cair (fica gravado no progresso).
+     */
+    private fun abrirMiniTarefa() {
+        val tarefa = _miniTarefa.value ?: return
+        if (tarefa.aberta || _caminhada.value == null || preparoExtraUsado || cumprido) return
+        Log.i(TAG, "Caminhada: mini tarefa aberta, sem bipe por até ${MINI_TAREFA_MAX_MS / 1000} s")
+        miniTarefaRetirada = true
+        salvarProgresso()
+        _miniTarefa.value = tarefa.copy(aberta = true, ate = SystemClock.elapsedRealtime() + MINI_TAREFA_MAX_MS)
+        handler.removeCallbacks(vigiaDaCaminhada)
+        pararMiniTarefa()
+        handler.postDelayed(fimDaMiniTarefa, MINI_TAREFA_MAX_MS)
+        val frase = tarefa.frase
         sirene.falar(voz?.fixa(FALA_DA_MINI_TAREFA)) {
-            if (_miniTarefa.value?.frase != frase) return@falar // já sumiu (ele andou) ou a música voltou
+            if (_miniTarefa.value?.aberta != true) return@falar // já fechou (o tempo, voltou, andou) ou a música voltou
             _miniTarefa.value = _miniTarefa.value?.copy(suaVez = true)
-            handler.postDelayed(vigiaDaCaminhada, ENTRE_BIPES_PARADO_MS)
-            // O reconhecedor é do serviço: a mini tarefa vale com a tela fechada também
-            pararMiniTarefa()
+            ouvinteDaMiniTarefa?.parar()
             ouvinteDaMiniTarefa = Ouvinte(
                 this, "mini tarefa", aceita = { repetiu(frase, it) },
                 onOuviu = { ouvido -> _miniTarefa.value = _miniTarefa.value?.copy(ouvido = ouvido) },
                 onAceito = { miniTarefaFeita() },
                 onIndisponivel = {
-                    // Depois de [comecar] (pode avisar de dentro dele): o cartão "sua vez" sem ninguém ouvindo enganaria
-                    handler.post {
-                        if (_miniTarefa.value?.frase != frase) return@post
-                        Log.w(TAG, "Caminhada: sem reconhecimento de voz pra mini tarefa, a oferta sai")
-                        pararMiniTarefa()
-                        _miniTarefa.value = null
-                    }
+                    // Depois de [comecar] (pode avisar de dentro dele): a tela "sua vez" sem ninguém ouvindo enganaria
+                    handler.post { fecharMiniTarefa("sem reconhecimento de voz") }
                 },
                 idioma = "en-US",
                 juntar = true,
@@ -1816,10 +1847,24 @@ class AlarmeService : Service() {
         }
     }
 
+    /** O tempo da tela da mini tarefa acabou sem ele repetir a frase. */
+    private val fimDaMiniTarefa = Runnable { fecharMiniTarefa("o tempo dela acabou") }
+
+    /** A tela da mini tarefa fecha sem o prazo a mais (o tempo dela, o "voltar" ou sem reconhecedor): os bipes voltam de onde estavam. */
+    private fun fecharMiniTarefa(motivo: String) {
+        if (_miniTarefa.value?.aberta != true) return
+        Log.i(TAG, "Caminhada: mini tarefa fechada ($motivo), os bipes voltam")
+        pararMiniTarefa()
+        _miniTarefa.value = null
+        handler.removeCallbacks(vigiaDaCaminhada)
+        handler.postDelayed(vigiaDaCaminhada, ENTRE_BIPES_PARADO_MS)
+    }
+
     /** A pessoa repetiu a frase da mini tarefa: o prazo pra sair ganha o extra, com as ondas, e os bipes param. Uma vez por manhã. */
     private fun miniTarefaFeita() {
         val alarme = _tocando.value ?: return
-        if (_miniTarefa.value?.suaVez != true || _caminhada.value == null || preparoExtraUsado || cumprido) return
+        val tarefa = _miniTarefa.value
+        if (tarefa == null || !tarefa.aberta || !tarefa.suaVez || _caminhada.value == null || preparoExtraUsado || cumprido) return
         Log.i(TAG, "Caminhada: mini tarefa feita, mais ${preparoExtra(alarme) / 1000} s de prazo pra sair")
         preparoExtraUsado = true
         pararMiniTarefa()
@@ -1946,7 +1991,7 @@ class AlarmeService : Service() {
         if (_caminhada.value == null || !_silenciado.value || _saudando.value || cumprido) return
         andado = maxOf(andado, andadoMs)
         _caminhada.value = _caminhada.value?.copy(andadoMs = andado) // a tela recriada no meio continua daqui
-        // Andou depois do primeiro bipe: já acordou, a mini tarefa some e não volta
+        // Andou depois do primeiro bipe: já acordou, o botão (ou a tela) da mini tarefa some e não volta
         if (_miniTarefa.value != null) {
             Log.i(TAG, "Caminhada: andou, a mini tarefa some")
             pararMiniTarefa()

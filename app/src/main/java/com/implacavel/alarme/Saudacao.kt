@@ -61,9 +61,13 @@ fun falaDeSair(prazoMs: Long): String {
 const val FALA_NAO_NEGOCIA = "Not my call, sir. What is the first thing you will do today?"
 
 /**
- * A mini tarefa do prazo pra sair ([ofereceMiniTarefa]): a voz oferece a [frase] no primeiro bipe de parado, pelo
- * tempo a mais que ela dá ([extraMs], o [preparoExtra]: 5 min; no teste, meio minuto).
+ * O botão da mini tarefa do prazo pra sair ([ofereceMiniTarefa]) apareceu, no primeiro bipe de parado: a voz avisa,
+ * pelo tempo a mais que ela dá ([extraMs], o [preparoExtra]: 5 min; no teste, meio minuto).
  */
+fun falaDoBotaoDaMiniTarefa(extraMs: Long): String =
+    "Fell asleep, sir? Tap the button on the screen for ${tempoAMais(extraMs)}."
+
+/** Na tela da mini tarefa, aberta pelo botão: a voz diz a [frase] pra repetir, pelo tempo a mais ([extraMs]). */
 fun falaDaMiniTarefa(frase: String, extraMs: Long): String =
     "Fell asleep, sir? Repeat this sentence and you get ${tempoAMais(extraMs)}: $frase"
 

@@ -358,8 +358,9 @@ fun rememberSentidosDaCaminhada(): SentidosDaCaminhada {
  * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada
  * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. Com [detalhar] (o
  * TesteDoGps), sem prazo nem bipe. No prazo, o botão das ondas ([ondasMudas], [onOndas]): quem não quer ouvir o mar
- * emudece nesta manhã. Depois do prazo, no primeiro bipe de parado, a [miniTarefa] do serviço: a frase pra repetir e
- * ganhar mais prazo (quem escuta é o serviço; a tela mostra o que ele ouve).
+ * emudece nesta manhã. Depois do prazo, no primeiro bipe de parado, a [miniTarefa] do serviço: um botão, uma vez só,
+ * que abre a tela da frase pra repetir e ganhar mais prazo, sem bipe enquanto ela está aberta ([onMiniTarefa]: abrir, ou
+ * voltar pra caminhada; quem escuta e decide é o serviço, a tela mostra o que ele ouve).
  */
 @Composable
 fun EtapaCaminhada(
@@ -373,6 +374,7 @@ fun EtapaCaminhada(
     ondasMudas: Boolean = false,
     onOndas: ((ligadas: Boolean) -> Unit)? = null,
     miniTarefa: MiniTarefa? = null,
+    onMiniTarefa: ((abrir: Boolean) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
@@ -397,6 +399,8 @@ fun EtapaCaminhada(
     val noPrazo = if (detalhar) "GPS test: no beeps" else avisoDoPrazo(agora, prazoAte)
     val paradoMs = if (andando) 0L else paradoHa(agora, ultimoPasso, prazoAte) ?: 0L
     val metaSegura = metaMs.coerceAtLeast(1)
+    // A tela da mini tarefa, aberta pelo botão, no lugar da caminhada (a caminhada segue contando no serviço)
+    if (miniTarefa?.aberta == true) return MiniTarefaAberta(miniTarefa, agora) { onMiniTarefa?.invoke(false) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(ANEL), contentAlignment = Alignment.Center) {
             AnelDaCaminhada(
@@ -422,9 +426,10 @@ fun EtapaCaminhada(
         } else {
             BarraDoBipe(paradoMs)
         }
-        if (miniTarefa != null) {
+        if (miniTarefa != null && onMiniTarefa != null) {
             Spacer(Modifier.height(12.dp))
-            MiniTarefaDoPrazo(miniTarefa)
+            BotaoGrande("😴 ${maisTempo(miniTarefa.extraMs)}", { onMiniTarefa(true) }, fundoClaro = true)
+            Text("Fell asleep? Tap and repeat one sentence. Only once.", color = AzulCaminhada, fontSize = 15.sp, textAlign = TextAlign.Center)
         }
         if (!sentidos.permitida) {
             Spacer(Modifier.height(12.dp))
@@ -443,6 +448,28 @@ fun EtapaCaminhada(
 
 private val TRILHA_TAMANHO = 180.dp
 
+/** O rótulo do botão da mini tarefa: "5 MORE MINUTES", "30 MORE SECONDS" (no teste). */
+private fun maisTempo(ms: Long): String = if (ms < 60_000L) "${ms / 1000} MORE SECONDS" else "${ms / 60_000} MORE MINUTES"
+
+/**
+ * A tela da mini tarefa, aberta pelo botão: sem bipe pelo tempo que falta ([MiniTarefa.ate]), a frase pra repetir e o
+ * "voltar" pra caminhada (sem o prazo a mais; o botão não volta). Quando o tempo acaba, quem fecha é o serviço.
+ */
+@Composable
+private fun MiniTarefaAberta(tarefa: MiniTarefa, agora: Long, onVoltar: () -> Unit) {
+    val resta = ((tarefa.ate - agora).coerceAtLeast(0) + 999) / 1000
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("🔕 Beeps paused", color = AzulCaminhada, fontSize = 30.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+        Text("%d:%02d to repeat it".format(resta / 60, resta % 60), color = AzulCaminhada.copy(alpha = 0.8f), fontSize = 18.sp)
+        Spacer(Modifier.height(20.dp))
+        MiniTarefaDoPrazo(tarefa)
+        Spacer(Modifier.height(20.dp))
+        TextButton(onClick = onVoltar, colors = ButtonDefaults.textButtonColors(contentColor = AzulCaminhada)) {
+            Text("Back to the walk (no extra time)", fontSize = 16.sp)
+        }
+    }
+}
+
 /**
  * A mini tarefa do prazo pra sair ([MiniTarefa]), só a tela: a frase que a voz ofereceu e, na vez da pessoa
  * ([MiniTarefa.suaVez], depois de a voz terminar), o que o serviço está ouvindo ([MiniTarefa.ouvido]), pintando de
@@ -455,7 +482,7 @@ private fun MiniTarefaDoPrazo(tarefa: MiniTarefa) {
         Modifier.fillMaxWidth(0.92f).background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(20.dp)).padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Fell asleep? Repeat this and you get more time:", color = AzulCaminhada, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text("Repeat this and you get more time:", color = AzulCaminhada, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         val frase = buildAnnotatedString {
             append("“")

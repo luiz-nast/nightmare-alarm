@@ -48,6 +48,8 @@ class TemposTest {
         assertEquals("Time to move, sir. Get dressed and go outside.", falaDeSair(0))
         // A mini tarefa promete o tempo que dá de fato: 5 min de verdade, meio minuto no teste
         assertEquals("Fell asleep, sir? Repeat this sentence and you get five more minutes: Go.", falaDaMiniTarefa("Go.", PREPARO_EXTRA_MS))
+        assertEquals("Fell asleep, sir? Tap the button on the screen for five more minutes.", falaDoBotaoDaMiniTarefa(PREPARO_EXTRA_MS))
+        assertEquals("Fell asleep, sir? Tap the button on the screen for half a minute more.", falaDoBotaoDaMiniTarefa(PREPARO_EXTRA_TESTE_MS))
         assertEquals("Five more minutes, sir. Get dressed and go outside.", falaMaisTempo(PREPARO_EXTRA_MS))
         assertEquals("Half a minute more, sir. Get dressed and go outside.", falaMaisTempo(PREPARO_EXTRA_TESTE_MS))
     }

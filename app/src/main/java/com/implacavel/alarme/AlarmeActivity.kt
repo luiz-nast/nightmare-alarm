@@ -234,6 +234,7 @@ private fun TelaAlarme(alarme: Alarme) {
                             ondasMudas = ondasMudas,
                             onOndas = { AlarmeService.ondas(ctx, ligadas = it) },
                             miniTarefa = miniTarefa,
+                            onMiniTarefa = { abrir -> AlarmeService.miniTarefa(ctx, abrir) },
                         )
                     }
                 }
